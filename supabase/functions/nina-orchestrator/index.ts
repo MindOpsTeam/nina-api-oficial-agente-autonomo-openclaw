@@ -19,6 +19,10 @@ const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 //  só atende o Lovable, seja modo lovable ou o fallback do openclaw.)
 const LOVABLE_REQUEST_TIMEOUT_MS = 30_000;
 
+// F3c: timeout curto do ACK do /hooks/agent (deliver:false só enfileira o run).
+// Falha/timeout no ACK => cai no fallback síncrono do Lovable no mesmo turno.
+const HOOKS_DISPATCH_TIMEOUT_MS = 12_000;
+
 // Tool definition for appointment creation
 const createAppointmentTool = {
   type: "function",
@@ -522,37 +526,63 @@ async function processQueueItem(
         `(também presentes no metadata desta chamada). Não revele esses IDs ao lead.`;
 
       const hookUrl = `${String(instance.ingress_url).replace(/\/+$/, '')}/hooks/agent`;
-      console.log(`[Nina] OpenClaw async dispatch -> ${hookUrl} (run_id=${runId})`);
+      console.log(`[Nina] OpenClaw dispatch -> ${hookUrl} (run_id=${runId})`);
 
-      // FIRE-AND-FORGET: a resposta volta async via nina-reply -> send_queue.
-      fetch(hookUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${instance.hooks_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: agentMessage,
-          name: 'nina_whatsapp',
-          wakeMode: 'now',
-          deliver: false,
-          timeoutSeconds: 120,
-          metadata: {
-            conversation_id: conversation.id,
-            run_id: runId,
-            contact_id: conversation.contact_id,
-            user_id: settings?.user_id ?? null,
+      // AWAIT o ACK do enfileiramento (deliver:false só ENFILEIRA o run — ack
+      // rápido, NÃO espera os 120s). Timeout curto via AbortController.
+      // Só consideramos despachado num ACK 2xx; qualquer falha (rede / timeout /
+      // status non-2xx, ex.: 401 hooks_token errado ou ingress_url stale) CAI no
+      // fallback síncrono do Lovable AI abaixo, no MESMO turno — lead nunca órfão.
+      // (fetch não rejeita em status de erro, por isso checamos response.ok.)
+      let dispatched = false;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), HOOKS_DISPATCH_TIMEOUT_MS);
+      try {
+        const hookResp = await fetch(hookUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${instance.hooks_token}`,
+            'Content-Type': 'application/json',
           },
-        }),
-      }).catch((err) => console.error('[Nina] /hooks/agent dispatch error:', err));
+          body: JSON.stringify({
+            message: agentMessage,
+            name: 'nina_whatsapp',
+            wakeMode: 'now',
+            deliver: false,
+            timeoutSeconds: 120,
+            metadata: {
+              conversation_id: conversation.id,
+              run_id: runId,
+              contact_id: conversation.contact_id,
+              user_id: settings?.user_id ?? null,
+            },
+          }),
+          signal: controller.signal,
+        });
+        if (hookResp.ok) {
+          dispatched = true;
+        } else {
+          console.error(`[Nina] dispatch /hooks/agent falhou (HTTP ${hookResp.status}) -> fallback Lovable AI`);
+        }
+      } catch (err) {
+        const reason = (err as Error)?.name === 'AbortError'
+          ? 'timeout'
+          : ((err as Error)?.message ?? 'erro de rede');
+        console.error(`[Nina] dispatch /hooks/agent falhou (${reason}) -> fallback Lovable AI`);
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
-      // Marca a mensagem como processada (dispatched); a resposta chega async.
-      await supabase.from('messages').update({ processed_by_nina: true }).eq('id', message.id);
-      console.log('[Nina] OpenClaw run dispatched, awaiting async reply via nina-reply');
-      return;
+      if (dispatched) {
+        // ACK 2xx: run enfileirado na VPS. A resposta volta async via nina-reply.
+        await supabase.from('messages').update({ processed_by_nina: true }).eq('id', message.id);
+        console.log(`[Nina] OpenClaw run enfileirado (run_id=${runId}), aguardando reply async via nina-reply`);
+        return;
+      }
+      // Não despachou: NÃO marca processed_by_nina e segue pro Lovable síncrono abaixo.
+    } else {
+      console.log('[Nina] sem instance openclaw ativa -> fallback Lovable AI');
     }
-
-    console.log('[Nina] sem instance openclaw ativa -> fallback Lovable AI');
   }
   // ────────────────────────────────────────────────────────────────────────────
 
