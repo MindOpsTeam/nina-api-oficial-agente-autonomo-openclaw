@@ -405,6 +405,81 @@ export type Database = {
           },
         ]
       }
+      installer_tokens: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          owner_user_id: string
+          token: string
+          used_at: string | null
+        }
+        Insert: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          owner_user_id?: string
+          token: string
+          used_at?: string | null
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          owner_user_id?: string
+          token?: string
+          used_at?: string | null
+        }
+        Relationships: []
+      }
+      instances: {
+        Row: {
+          agent_type: string
+          created_at: string
+          hooks_token: string | null
+          hostname: string | null
+          id: string
+          ingress_url: string | null
+          last_heartbeat: string | null
+          openclaw_dashboard_token: string | null
+          openclaw_version: string | null
+          owner_user_id: string
+          status: string
+          system_prompt: string | null
+          updated_at: string
+        }
+        Insert: {
+          agent_type?: string
+          created_at?: string
+          hooks_token?: string | null
+          hostname?: string | null
+          id?: string
+          ingress_url?: string | null
+          last_heartbeat?: string | null
+          openclaw_dashboard_token?: string | null
+          openclaw_version?: string | null
+          owner_user_id?: string
+          status?: string
+          system_prompt?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agent_type?: string
+          created_at?: string
+          hooks_token?: string | null
+          hostname?: string | null
+          id?: string
+          ingress_url?: string | null
+          last_heartbeat?: string | null
+          openclaw_dashboard_token?: string | null
+          openclaw_version?: string | null
+          owner_user_id?: string
+          status?: string
+          system_prompt?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       message_grouping_queue: {
         Row: {
           contacts_data: Json | null
@@ -1234,6 +1309,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_secret: { Args: { secret_name: string }; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
