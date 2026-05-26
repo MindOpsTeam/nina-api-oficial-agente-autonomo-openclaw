@@ -625,6 +625,8 @@ export type Database = {
           async_booking_enabled: boolean | null
           audio_response_enabled: boolean | null
           auto_response_enabled: boolean
+          brain_provider: string
+          brain_repo_url: string | null
           business_days: number[]
           business_hours_end: string
           business_hours_start: string
@@ -641,6 +643,9 @@ export type Database = {
           id: string
           is_active: boolean
           message_breaking_enabled: boolean
+          openclaw_gateway_token: string | null
+          openclaw_gateway_url: string | null
+          openclaw_model: string | null
           response_delay_max: number
           response_delay_min: number
           route_all_to_receiver_enabled: boolean
@@ -663,6 +668,8 @@ export type Database = {
           async_booking_enabled?: boolean | null
           audio_response_enabled?: boolean | null
           auto_response_enabled?: boolean
+          brain_provider?: string
+          brain_repo_url?: string | null
           business_days?: number[]
           business_hours_end?: string
           business_hours_start?: string
@@ -679,6 +686,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           message_breaking_enabled?: boolean
+          openclaw_gateway_token?: string | null
+          openclaw_gateway_url?: string | null
+          openclaw_model?: string | null
           response_delay_max?: number
           response_delay_min?: number
           route_all_to_receiver_enabled?: boolean
@@ -701,6 +711,8 @@ export type Database = {
           async_booking_enabled?: boolean | null
           audio_response_enabled?: boolean | null
           auto_response_enabled?: boolean
+          brain_provider?: string
+          brain_repo_url?: string | null
           business_days?: number[]
           business_hours_end?: string
           business_hours_start?: string
@@ -717,6 +729,9 @@ export type Database = {
           id?: string
           is_active?: boolean
           message_breaking_enabled?: boolean
+          openclaw_gateway_token?: string | null
+          openclaw_gateway_url?: string | null
+          openclaw_model?: string | null
           response_delay_max?: number
           response_delay_min?: number
           route_all_to_receiver_enabled?: boolean
