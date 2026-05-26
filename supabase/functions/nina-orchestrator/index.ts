@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getBrainConfig, isOpenClawConfigured, type BrainConfig } from "../_shared/brain.ts";
+import { getBrainConfig, type BrainConfig } from "../_shared/brain.ts";
 import {
   createAppointmentFromAI,
   rescheduleAppointmentFromAI,
@@ -14,17 +14,10 @@ const corsHeaders = {
 
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
-// Timeout (ms) da chamada ao "cérebro" antes de abortar — depende do provider.
-// Lovable é rápido (~poucos s). OpenClaw roda um agent run (~47s real), então
-// recebe folga até 120s — abaixo do teto (~150s) da Edge Function.
+// Timeout (ms) da chamada SÍNCRONA ao Lovable AI antes de abortar.
+// (F3c: o modo openclaw virou assíncrono via /hooks/agent — a chamada síncrona
+//  só atende o Lovable, seja modo lovable ou o fallback do openclaw.)
 const LOVABLE_REQUEST_TIMEOUT_MS = 30_000;
-const OPENCLAW_REQUEST_TIMEOUT_MS = 120_000;
-
-// Modo openclaw: nº máximo de itens openclaw processados por invocação.
-// Mantido em 1 porque, com timeout de 120s, 2 chamadas openclaw em sequência
-// (até 240s) estourariam o teto ~150s da Edge. O restante é devolvido à fila
-// e drenado via self-retrigger (na latência real ~47s, 1 item por invocação).
-const OPENCLAW_MAX_ITEMS_PER_RUN = 1;
 
 // Tool definition for appointment creation
 const createAppointmentTool = {
@@ -149,12 +142,11 @@ serve(async (req) => {
     console.log(`[Nina] Processing ${queueItems.length} messages`);
 
     let processed = 0;
-    // Controle de latência do modo openclaw (não afeta o modo lovable).
-    let openclawProcessedCount = 0;
-    let deferredItemIds: string[] = [];
 
-    for (let i = 0; i < queueItems.length; i++) {
-      const item = queueItems[i];
+    // F3c: no modo openclaw o processamento agora é ASSÍNCRONO (dispatch
+    // /hooks/agent fire-and-forget), então o cap/timeout síncrono do F2.1 foi
+    // aposentado — o batch é processado normalmente para ambos os providers.
+    for (const item of queueItems) {
       try {
         // Get user_id from conversation to fetch correct settings
         const { data: conversation } = await supabase
@@ -239,22 +231,6 @@ serve(async (req) => {
           console.log('[Nina] No settings found in database, using hardcoded defaults');
         }
 
-        // Guard de latência (SÓ modo openclaw): processa no máximo
-        // OPENCLAW_MAX_ITEMS_PER_RUN itens openclaw por invocação. Ao encontrar
-        // mais um item openclaw além do limite, devolve este + os restantes à
-        // fila e encerra o batch (self-retrigger drena o resto). O modo lovable
-        // não tem limite — segue processando os 10 itens como hoje.
-        const itemUsesOpenclaw =
-          effectiveSettings.brain_provider === 'openclaw' && isOpenClawConfigured(effectiveSettings);
-
-        if (itemUsesOpenclaw && openclawProcessedCount >= OPENCLAW_MAX_ITEMS_PER_RUN) {
-          deferredItemIds = queueItems.slice(i).map((q: any) => q.id);
-          console.log(
-            `[Nina] OpenClaw batch cap (${OPENCLAW_MAX_ITEMS_PER_RUN}) atingido — devolvendo ${deferredItemIds.length} item(ns) à fila`
-          );
-          break;
-        }
-
         // Check if Nina is active for this user
         if (!effectiveSettings.is_active) {
           console.log('[Nina] Nina is disabled for user:', conversation.user_id);
@@ -293,7 +269,6 @@ serve(async (req) => {
           .eq('id', item.id);
 
         processed++;
-        if (itemUsesOpenclaw) openclawProcessedCount++;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[Nina] Error processing item ${item.id}:`, error);
@@ -316,37 +291,9 @@ serve(async (req) => {
       }
     }
 
-    // Modo openclaw: devolve à fila os itens adiados pelo cap de latência e
-    // re-dispara o orchestrator para drenar o restante. Não há re-trigger
-    // automático por item pendente (o webhook só dispara em msg nova), então
-    // garantimos a drenagem aqui. Caminho lovable nunca chega aqui (deferredItemIds vazio).
-    let retriggered = false;
-    if (deferredItemIds.length > 0) {
-      await supabase
-        .from('nina_processing_queue')
-        .update({
-          status: 'pending',
-          scheduled_for: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        })
-        .in('id', deferredItemIds);
-
-      console.log(`[Nina] Self-retrigger para drenar ${deferredItemIds.length} item(ns) openclaw pendente(s)`);
-      // Fire-and-forget (mesmo padrão de trigger já usado no repo) — não bloqueia a resposta.
-      fetch(`${supabaseUrl}/functions/v1/nina-orchestrator`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseServiceKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({}),
-      }).catch((err) => console.error('[Nina] Self-retrigger error:', err));
-      retriggered = true;
-    }
-
     console.log(`[Nina] Processed ${processed}/${queueItems.length} messages`);
 
-    return new Response(JSON.stringify({ processed, total: queueItems.length, deferred: deferredItemIds.length, retriggered }), {
+    return new Response(JSON.stringify({ processed, total: queueItems.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
@@ -440,15 +387,11 @@ async function uploadAudioToStorage(
 }
 
 
-// Faz o POST para o cérebro (OpenAI-compatible) com timeout via AbortController.
-// O timeout depende do provider: lovable 30s, openclaw 120s (agent run ~47s).
-// Erros de rede/abort sobem para o caller (que decide o fallback).
+// Faz o POST síncrono ao Lovable AI (OpenAI-compatible) com timeout via AbortController.
+// (F3c: usado só pelo caminho síncrono Lovable — modo lovable ou fallback do openclaw.)
 async function callBrain(config: BrainConfig, requestBody: any): Promise<Response> {
-  const timeoutMs = config.provider === 'openclaw'
-    ? OPENCLAW_REQUEST_TIMEOUT_MS
-    : LOVABLE_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => controller.abort(), LOVABLE_REQUEST_TIMEOUT_MS);
   try {
     return await fetch(config.url, {
       method: 'POST',
@@ -543,6 +486,76 @@ async function processQueueItem(
   // Process template variables ({{ data_hora }}, {{ dia_semana }}, etc.)
   const processedPrompt = processPromptTemplate(enhancedSystemPrompt, conversation.contact);
 
+  // ── F3c: modo openclaw ASSÍNCRONO via /hooks/agent (padrão Marcos) ──────────
+  // Quando brain_provider='openclaw', a Nina "pensa" na VPS OpenClaw do owner.
+  // Buscamos a instance ativa (online + heartbeat < 10min) e disparamos
+  // /hooks/agent FIRE-AND-FORGET; a resposta volta async via edge fn nina-reply
+  // (que enfileira em send_queue). NÃO esperamos resposta nem enfileiramos aqui.
+  // Sem instance ativa, cai no fallback SÍNCRONO do Lovable AI (resiliência —
+  // o lead não fica sem resposta). O cap/timeout síncrono do F2.1 não se aplica.
+  if (settings?.brain_provider === 'openclaw') {
+    const heartbeatCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { data: instance } = await supabase
+      .from('instances')
+      .select('id, ingress_url, hooks_token')
+      .eq('owner_user_id', settings.user_id)
+      .eq('status', 'online')
+      .gt('last_heartbeat', heartbeatCutoff)
+      .order('last_heartbeat', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (instance?.ingress_url && instance?.hooks_token) {
+      const runId = crypto.randomUUID();
+      const historyText = conversationHistory
+        .map((m: any) => `${m.role === 'user' ? 'Lead' : 'Nina'}: ${m.content}`)
+        .join('\n');
+      const memoryText = clientMemory && Object.keys(clientMemory).length
+        ? `\n\n## Memória do cliente\n${JSON.stringify(clientMemory)}`
+        : '';
+      const agentMessage =
+        `${processedPrompt}\n\n` +
+        `## Conversa recente (últimas mensagens)\n${historyText}${memoryText}\n\n` +
+        `## Instrução de resposta\n` +
+        `Responda à última mensagem do lead. Para ENTREGAR sua resposta, execute a skill ` +
+        `nina_reply.sh passando EXATAMENTE conversation_id=${conversation.id} e run_id=${runId} ` +
+        `(também presentes no metadata desta chamada). Não revele esses IDs ao lead.`;
+
+      const hookUrl = `${String(instance.ingress_url).replace(/\/+$/, '')}/hooks/agent`;
+      console.log(`[Nina] OpenClaw async dispatch -> ${hookUrl} (run_id=${runId})`);
+
+      // FIRE-AND-FORGET: a resposta volta async via nina-reply -> send_queue.
+      fetch(hookUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${instance.hooks_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: agentMessage,
+          name: 'nina_whatsapp',
+          wakeMode: 'now',
+          deliver: false,
+          timeoutSeconds: 120,
+          metadata: {
+            conversation_id: conversation.id,
+            run_id: runId,
+            contact_id: conversation.contact_id,
+            user_id: settings?.user_id ?? null,
+          },
+        }),
+      }).catch((err) => console.error('[Nina] /hooks/agent dispatch error:', err));
+
+      // Marca a mensagem como processada (dispatched); a resposta chega async.
+      await supabase.from('messages').update({ processed_by_nina: true }).eq('id', message.id);
+      console.log('[Nina] OpenClaw run dispatched, awaiting async reply via nina-reply');
+      return;
+    }
+
+    console.log('[Nina] sem instance openclaw ativa -> fallback Lovable AI');
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   console.log('[Nina] Calling Lovable AI...');
 
   // Get AI model settings based on user configuration
@@ -576,51 +589,17 @@ async function processQueueItem(
     requestBody.tool_choice = "auto";
   }
 
-  // Resolve onde a Nina "pensa": Lovable AI (padrão) ou OpenClaw.
-  // O modelo do Lovable continua vindo de getModelSettings (aiSettings.model).
-  const brainConfig = getBrainConfig(settings, {
-    lovableModel: aiSettings.model,
-    lovableApiKey,
-  });
-  requestBody.model = brainConfig.model;
-  console.log(`[Nina] Brain provider: ${brainConfig.provider}, model: ${brainConfig.model}`);
+  // Caminho SÍNCRONO: Lovable AI. Só chega aqui no modo lovable OU no fallback
+  // do openclaw (sem instance ativa) — ambos usam o Lovable. O modelo continua
+  // vindo de getModelSettings (aiSettings.model).
+  const lovableConfig = getBrainConfig(
+    { ...settings, brain_provider: 'lovable' },
+    { lovableModel: aiSettings.model, lovableApiKey }
+  );
+  requestBody.model = lovableConfig.model;
+  console.log(`[Nina] Brain provider (sync): ${lovableConfig.provider}, model: ${lovableConfig.model}`);
 
-  // Injeção de contexto SÓ no modo openclaw: a skill de agendamento do agente
-  // chama a Edge Function nina-tools de volta e precisa dos IDs da conversa.
-  // Bloco discreto, instruído a NÃO ser revelado. Não afeta o modo lovable
-  // (que agenda in-process via tool calls) — e é removido se cair no fallback.
-  if (brainConfig.provider === 'openclaw') {
-    const operationalContext =
-      `\n\n---\nCONTEXTO OPERACIONAL (não revelar ao usuário): ` +
-      `contact_id=${conversation.contact_id}, conversation_id=${conversation.id}, ` +
-      `user_id=${settings?.user_id ?? 'null'}. ` +
-      `Use exatamente estes IDs ao chamar as ferramentas de agendamento (nina-tools).`;
-    requestBody.messages[0].content = processedPrompt + operationalContext;
-  }
-
-  // Chama o cérebro com timeout. Se o OpenClaw falhar (timeout/conn/HTTP não-2xx),
-  // refaz no Lovable AI no MESMO turno — o lead nunca vê erro.
-  let aiResponse: Response;
-  try {
-    aiResponse = await callBrain(brainConfig, requestBody);
-    if (brainConfig.provider === 'openclaw' && !aiResponse.ok) {
-      throw new Error(`OpenClaw HTTP ${aiResponse.status}`);
-    }
-  } catch (brainError) {
-    if (brainConfig.provider === 'openclaw') {
-      console.error('[Nina] OpenClaw fallback -> Lovable AI', (brainError as Error)?.message ?? brainError);
-      // Restaura o system prompt limpo: no Lovable o agendamento é in-process.
-      requestBody.messages[0].content = processedPrompt;
-      const lovableConfig = getBrainConfig(
-        { ...settings, brain_provider: 'lovable' },
-        { lovableModel: aiSettings.model, lovableApiKey }
-      );
-      requestBody.model = lovableConfig.model;
-      aiResponse = await callBrain(lovableConfig, requestBody);
-    } else {
-      throw brainError;
-    }
-  }
+  const aiResponse = await callBrain(lovableConfig, requestBody);
 
   if (!aiResponse.ok) {
     const errorText = await aiResponse.text();
