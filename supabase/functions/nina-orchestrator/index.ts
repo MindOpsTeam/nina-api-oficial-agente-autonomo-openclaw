@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getBrainConfig, type BrainConfig } from "../_shared/brain.ts";
+import { getBrainConfig, isOpenClawConfigured, type BrainConfig } from "../_shared/brain.ts";
 import {
   createAppointmentFromAI,
   rescheduleAppointmentFromAI,
@@ -14,8 +14,17 @@ const corsHeaders = {
 
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
 
-// Timeout (ms) para a chamada ao "cérebro" (Lovable AI / OpenClaw) antes de abortar.
-const BRAIN_REQUEST_TIMEOUT_MS = 25_000;
+// Timeout (ms) da chamada ao "cérebro" antes de abortar — depende do provider.
+// Lovable é rápido (~poucos s). OpenClaw roda um agent run (~47s real), então
+// recebe folga até 120s — abaixo do teto (~150s) da Edge Function.
+const LOVABLE_REQUEST_TIMEOUT_MS = 30_000;
+const OPENCLAW_REQUEST_TIMEOUT_MS = 120_000;
+
+// Modo openclaw: nº máximo de itens openclaw processados por invocação.
+// Mantido em 1 porque, com timeout de 120s, 2 chamadas openclaw em sequência
+// (até 240s) estourariam o teto ~150s da Edge. O restante é devolvido à fila
+// e drenado via self-retrigger (na latência real ~47s, 1 item por invocação).
+const OPENCLAW_MAX_ITEMS_PER_RUN = 1;
 
 // Tool definition for appointment creation
 const createAppointmentTool = {
@@ -140,8 +149,12 @@ serve(async (req) => {
     console.log(`[Nina] Processing ${queueItems.length} messages`);
 
     let processed = 0;
+    // Controle de latência do modo openclaw (não afeta o modo lovable).
+    let openclawProcessedCount = 0;
+    let deferredItemIds: string[] = [];
 
-    for (const item of queueItems) {
+    for (let i = 0; i < queueItems.length; i++) {
+      const item = queueItems[i];
       try {
         // Get user_id from conversation to fetch correct settings
         const { data: conversation } = await supabase
@@ -226,6 +239,22 @@ serve(async (req) => {
           console.log('[Nina] No settings found in database, using hardcoded defaults');
         }
 
+        // Guard de latência (SÓ modo openclaw): processa no máximo
+        // OPENCLAW_MAX_ITEMS_PER_RUN itens openclaw por invocação. Ao encontrar
+        // mais um item openclaw além do limite, devolve este + os restantes à
+        // fila e encerra o batch (self-retrigger drena o resto). O modo lovable
+        // não tem limite — segue processando os 10 itens como hoje.
+        const itemUsesOpenclaw =
+          effectiveSettings.brain_provider === 'openclaw' && isOpenClawConfigured(effectiveSettings);
+
+        if (itemUsesOpenclaw && openclawProcessedCount >= OPENCLAW_MAX_ITEMS_PER_RUN) {
+          deferredItemIds = queueItems.slice(i).map((q: any) => q.id);
+          console.log(
+            `[Nina] OpenClaw batch cap (${OPENCLAW_MAX_ITEMS_PER_RUN}) atingido — devolvendo ${deferredItemIds.length} item(ns) à fila`
+          );
+          break;
+        }
+
         // Check if Nina is active for this user
         if (!effectiveSettings.is_active) {
           console.log('[Nina] Nina is disabled for user:', conversation.user_id);
@@ -262,8 +291,9 @@ serve(async (req) => {
             processed_at: new Date().toISOString() 
           })
           .eq('id', item.id);
-        
+
         processed++;
+        if (itemUsesOpenclaw) openclawProcessedCount++;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         console.error(`[Nina] Error processing item ${item.id}:`, error);
@@ -286,9 +316,37 @@ serve(async (req) => {
       }
     }
 
+    // Modo openclaw: devolve à fila os itens adiados pelo cap de latência e
+    // re-dispara o orchestrator para drenar o restante. Não há re-trigger
+    // automático por item pendente (o webhook só dispara em msg nova), então
+    // garantimos a drenagem aqui. Caminho lovable nunca chega aqui (deferredItemIds vazio).
+    let retriggered = false;
+    if (deferredItemIds.length > 0) {
+      await supabase
+        .from('nina_processing_queue')
+        .update({
+          status: 'pending',
+          scheduled_for: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', deferredItemIds);
+
+      console.log(`[Nina] Self-retrigger para drenar ${deferredItemIds.length} item(ns) openclaw pendente(s)`);
+      // Fire-and-forget (mesmo padrão de trigger já usado no repo) — não bloqueia a resposta.
+      fetch(`${supabaseUrl}/functions/v1/nina-orchestrator`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${supabaseServiceKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }).catch((err) => console.error('[Nina] Self-retrigger error:', err));
+      retriggered = true;
+    }
+
     console.log(`[Nina] Processed ${processed}/${queueItems.length} messages`);
 
-    return new Response(JSON.stringify({ processed, total: queueItems.length }), {
+    return new Response(JSON.stringify({ processed, total: queueItems.length, deferred: deferredItemIds.length, retriggered }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
@@ -383,10 +441,14 @@ async function uploadAudioToStorage(
 
 
 // Faz o POST para o cérebro (OpenAI-compatible) com timeout via AbortController.
-// Aborta após BRAIN_REQUEST_TIMEOUT_MS; erros de rede/abort sobem para o caller (que decide o fallback).
+// O timeout depende do provider: lovable 30s, openclaw 120s (agent run ~47s).
+// Erros de rede/abort sobem para o caller (que decide o fallback).
 async function callBrain(config: BrainConfig, requestBody: any): Promise<Response> {
+  const timeoutMs = config.provider === 'openclaw'
+    ? OPENCLAW_REQUEST_TIMEOUT_MS
+    : LOVABLE_REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), BRAIN_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(config.url, {
       method: 'POST',
