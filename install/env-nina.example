@@ -1,0 +1,25 @@
+# Nina SDR — variáveis de ambiente da VPS (~/.nina-sdr/.env)
+# Escritas pelo setup-installer (.install_env.sh) e completadas pelo setup-nina.sh.
+# Nunca commitar valores reais.
+
+# ── Injetadas pelo setup-installer (vêm do painel/Vault) ──────────────────────
+# Base das edge functions do app: https://<projeto>.supabase.co/functions/v1
+PANEL_BASE_URL=
+# Segredo VPS↔app (header X-Panel-Token). Global; vive no Vault server-side.
+PANEL_TOKEN=
+# Token one-time (gerado em onboarding-issue-token). Resolve o dono no instance-register.
+INSTALLER_TOKEN=
+# Chave Anthropic usada pelo OpenClaw para o LLM (provider anthropic/claude-sonnet-4-6).
+ANTHROPIC_API_KEY=
+# Endpoint da ferramenta de agendamento: {PANEL_BASE_URL}/nina-tools
+NINA_TOOLS_URL=
+# Segredo da ferramenta (header x-nina-secret). Vive no Vault server-side.
+NINA_TOOLS_SECRET=
+
+# ── Geradas/preenchidas pelo setup-nina.sh ────────────────────────────────────
+# Token dos hooks do gateway (Authorization: Bearer no /hooks/agent). openssl rand -hex 16.
+HOOKS_TOKEN=
+# URL pública do Cloudflare Tunnel (quick tunnel; muda a cada restart — heartbeat re-detecta).
+INGRESS_URL=
+# Id da instância retornado pelo instance-register.
+INSTANCE_ID=
