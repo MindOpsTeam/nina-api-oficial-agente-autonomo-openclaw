@@ -17,7 +17,7 @@ import {
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
-  if (!validatePanelToken(req)) return errorResponse("Token inválido", 401);
+  if (!(await validatePanelToken(req))) return errorResponse("Token inválido", 401);
 
   let body: {
     instance_id?: string;

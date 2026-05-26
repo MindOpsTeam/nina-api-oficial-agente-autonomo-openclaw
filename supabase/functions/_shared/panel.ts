@@ -1,9 +1,10 @@
 // _shared/panel.ts
 // Helpers do backbone de instâncias OpenClaw (F3a), replicando o padrão da
-// carteira-do-agente. Auth VPS → app: header X-Panel-Token vs env PANEL_TOKEN.
+// carteira-do-agente. Auth VPS → app: header X-Panel-Token vs PANEL_TOKEN (Vault).
 // Mantido separado de _shared/auth.ts (que usa outra convenção) — aditivo.
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getSecret } from "./secrets.ts";
 
 // Supabase admin client (service_role) — ignora RLS.
 export function adminClient(): SupabaseClient {
@@ -12,11 +13,12 @@ export function adminClient(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// Valida o header X-Panel-Token contra env PANEL_TOKEN (comparação em tempo constante).
-export function validatePanelToken(req: Request): boolean {
+// Valida o header X-Panel-Token contra o PANEL_TOKEN do Vault (comparação em
+// tempo constante). Fail-closed: sem header ou sem segredo configurado → false.
+export async function validatePanelToken(req: Request): Promise<boolean> {
   const token = req.headers.get("X-Panel-Token");
   if (!token) return false;
-  const expected = Deno.env.get("PANEL_TOKEN");
+  const expected = await getSecret("PANEL_TOKEN");
   if (!expected) return false;
   if (token.length !== expected.length) return false;
   let diff = 0;
