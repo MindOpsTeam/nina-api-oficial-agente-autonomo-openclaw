@@ -5,6 +5,7 @@ import {
   rescheduleAppointmentFromAI,
   cancelAppointmentFromAI,
 } from "../_shared/appointments.ts";
+import { getSecret } from "../_shared/secrets.ts";
 
 // nina-tools: backend de ferramentas chamado pela SKILL de agendamento do agente OpenClaw.
 // Autenticação por header 'x-nina-secret' (NÃO usa JWT do Supabase) — é server-to-server
@@ -39,8 +40,8 @@ serve(async (req) => {
     return json({ error: 'method_not_allowed' }, 405);
   }
 
-  // Auth: x-nina-secret deve bater com o secret configurado nas Edge Functions.
-  const expectedSecret = Deno.env.get('NINA_TOOLS_SECRET');
+  // Auth: x-nina-secret deve bater com NINA_TOOLS_SECRET (lido do Vault).
+  const expectedSecret = await getSecret('NINA_TOOLS_SECRET');
   const providedSecret = req.headers.get('x-nina-secret');
   if (!expectedSecret || !providedSecret || providedSecret !== expectedSecret) {
     console.warn('[nina-tools] Unauthorized: missing/invalid x-nina-secret');
