@@ -1,13 +1,16 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getBrainConfig, type BrainConfig } from "../_shared/brain.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const LOVABLE_AI_URL = "https://ai.gateway.lovable.dev/v1/chat/completions";
 const ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech";
+
+// Timeout (ms) para a chamada ao "cérebro" (Lovable AI / OpenClaw) antes de abortar.
+const BRAIN_REQUEST_TIMEOUT_MS = 25_000;
 
 // Tool definition for appointment creation
 const createAppointmentTool = {
@@ -635,6 +638,26 @@ async function cancelAppointmentFromAI(
   return data;
 }
 
+// Faz o POST para o cérebro (OpenAI-compatible) com timeout via AbortController.
+// Aborta após BRAIN_REQUEST_TIMEOUT_MS; erros de rede/abort sobem para o caller (que decide o fallback).
+async function callBrain(config: BrainConfig, requestBody: any): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), BRAIN_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(config.url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function processQueueItem(
   supabase: any,
   lovableApiKey: string,
@@ -747,15 +770,36 @@ async function processQueueItem(
     requestBody.tool_choice = "auto";
   }
 
-  // Call Lovable AI Gateway
-  const aiResponse = await fetch(LOVABLE_AI_URL, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${lovableApiKey}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(requestBody)
+  // Resolve onde a Nina "pensa": Lovable AI (padrão) ou OpenClaw.
+  // O modelo do Lovable continua vindo de getModelSettings (aiSettings.model).
+  const brainConfig = getBrainConfig(settings, {
+    lovableModel: aiSettings.model,
+    lovableApiKey,
   });
+  requestBody.model = brainConfig.model;
+  console.log(`[Nina] Brain provider: ${brainConfig.provider}, model: ${brainConfig.model}`);
+
+  // Chama o cérebro com timeout. Se o OpenClaw falhar (timeout/conn/HTTP não-2xx),
+  // refaz no Lovable AI no MESMO turno — o lead nunca vê erro.
+  let aiResponse: Response;
+  try {
+    aiResponse = await callBrain(brainConfig, requestBody);
+    if (brainConfig.provider === 'openclaw' && !aiResponse.ok) {
+      throw new Error(`OpenClaw HTTP ${aiResponse.status}`);
+    }
+  } catch (brainError) {
+    if (brainConfig.provider === 'openclaw') {
+      console.error('[Nina] OpenClaw fallback -> Lovable AI', (brainError as Error)?.message ?? brainError);
+      const lovableConfig = getBrainConfig(
+        { ...settings, brain_provider: 'lovable' },
+        { lovableModel: aiSettings.model, lovableApiKey }
+      );
+      requestBody.model = lovableConfig.model;
+      aiResponse = await callBrain(lovableConfig, requestBody);
+    } else {
+      throw brainError;
+    }
+  }
 
   if (!aiResponse.ok) {
     const errorText = await aiResponse.text();
