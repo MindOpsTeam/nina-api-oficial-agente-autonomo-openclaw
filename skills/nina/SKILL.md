@@ -66,7 +66,15 @@ conversa. Extraia e use:
 | `scripts/nina_reply.sh` | Entrega a resposta ao lead (POST /nina-reply → send_queue). |
 | `scripts/agendar.sh`    | create/reschedule/cancel via nina-tools (header x-nina-secret). |
 | `scripts/heartbeat.sh`  | Cron */5: re-detecta ingress_url + manda system_prompt ao painel. |
+| `scripts/brain_sync.sh` | Cron */2 + sob demanda: puxa o branch `nina-brain` (Brain Build) e atualiza persona/conhecimento (NÃO toca em `scripts/`). |
 | `scripts/_shared.sh`    | Helpers (carrega .env, `_panel_post` com X-Panel-Token + retry). |
+
+## Sincronizar o cérebro (Brain Build)
+
+A persona/conhecimento (identity/soul/knowledge) vêm do branch `nina-brain` do repo
+do cliente e são puxados automaticamente pelo cron `brain_sync.sh` (*/2 min) — o
+OpenClaw hot-reloada os arquivos do workspace. Se o app pedir um **sync imediato**
+(botão "Sincronizar" → /hooks/agent), execute: `bash skills/nina/scripts/brain_sync.sh`.
 
 ## Regras
 

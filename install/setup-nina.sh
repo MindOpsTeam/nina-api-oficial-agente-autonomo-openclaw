@@ -23,12 +23,16 @@ fail() { echo -e "${RED}✗${NC} $*" >&2; exit 1; }
 # ── Constantes ────────────────────────────────────────────────────────────────
 SKILL_REPO="${SKILL_REPO:-https://github.com/MindOpsTeam/nina-api-oficial-agente-autonomo-openclaw.git}"
 SKILL_BRANCH="${SKILL_BRANCH:-main}"
+# Brain Build (T3): branch dedicado do repo do cliente com identity/soul/knowledge
+# da Nina. A VPS rastreia esse branch e puxa atualizações (hot-reload do OpenClaw).
+BRAIN_BRANCH="${BRAIN_BRANCH:-nina-brain}"
 SKILL_NAME="nina"
 WS_ROOT="${HOME}/.openclaw/workspace"
 SKILL_DEST="${WS_ROOT}/skills/${SKILL_NAME}"
 STATE_DIR="${HOME}/.nina-sdr"
 ENV_FILE="${STATE_DIR}/.env"
 LOG_DIR="${STATE_DIR}/logs"
+BRAIN_DIR="${STATE_DIR}/brain"   # clone git que rastreia nina-brain (read-only via token)
 GW_PORT=18789
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "${WS_ROOT}/skills"
@@ -157,20 +161,39 @@ fi
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 6 — Instalar skill nina + AGENTS.md/SOUL.md
 # ═══════════════════════════════════════════════════════════════════════════════
+# Monta URL https autenticada (token só em runtime; não persiste no .git/config).
+_auth_url() {
+    local u="$1"
+    [[ -n "${GITHUB_BRAIN_TOKEN:-}" ]] && echo "${u/https:\/\//https://x-access-token:${GITHUB_BRAIN_TOKEN}@}" || echo "$u"
+}
+
 _install_skill() {
-    if [[ -d "$SKILL_DEST" && -f "$SKILL_DEST/SKILL.md" ]]; then ok "Skill ${SKILL_NAME} já instalada."; return; fi
-    info "Clonando skill '${SKILL_NAME}'..."
-    local clone="/tmp/nina-skill-clone-$$"; rm -rf "$clone"
-    git clone --depth 1 --branch "$SKILL_BRANCH" --filter=blob:none --sparse "$SKILL_REPO" "$clone" 2>/dev/null \
-        || fail "Falha ao clonar $SKILL_REPO ($SKILL_BRANCH)."
-    ( cd "$clone" && git sparse-checkout set "skills/${SKILL_NAME}" "install/templates" )
-    cp -r "$clone/skills/${SKILL_NAME}" "$SKILL_DEST"
-    # Templates AGENTS/SOUL (root do workspace)
-    [[ -f "$clone/install/templates/AGENTS-nina.md" ]] && cp "$clone/install/templates/AGENTS-nina.md" "${WS_ROOT}/AGENTS.md"
-    [[ -f "$clone/install/templates/SOUL-nina.md" ]]   && cp "$clone/install/templates/SOUL-nina.md"   "${WS_ROOT}/SOUL.md"
-    rm -rf "$clone"
+    local auth; auth="$(_auth_url "$SKILL_REPO")"
+    # Escolhe o branch inicial: nina-brain se JÁ existir no remoto; senão o default
+    # (skill genérica) — sem quebrar. O cron sempre puxa nina-brain depois.
+    local branch="$SKILL_BRANCH"
+    if git ls-remote --heads "$auth" "$BRAIN_BRANCH" 2>/dev/null | grep -q "refs/heads/${BRAIN_BRANCH}"; then
+        branch="$BRAIN_BRANCH"; ok "Branch '${BRAIN_BRANCH}' existe — instalando Brain Build do cliente."
+    else
+        warn "Branch '${BRAIN_BRANCH}' ainda não existe — instalando skill genérica de '${SKILL_BRANCH}' (o cron puxa quando aparecer)."
+    fi
+
+    # Clone persistente (raso, sparse) — fonte da skill e alvo do pull do cron.
+    if [[ ! -d "$BRAIN_DIR/.git" ]]; then
+        rm -rf "$BRAIN_DIR"
+        git clone --depth 1 --branch "$branch" --filter=blob:none --sparse "$auth" "$BRAIN_DIR" 2>/dev/null \
+            || fail "Falha ao clonar $SKILL_REPO ($branch). Repo privado? Confira GITHUB_BRAIN_TOKEN."
+        ( cd "$BRAIN_DIR" && git sparse-checkout set "skills/${SKILL_NAME}" "install/templates" )
+        git -C "$BRAIN_DIR" remote set-url origin "$SKILL_REPO"   # tira o token do remote persistido
+    fi
+
+    [[ -d "$BRAIN_DIR/skills/${SKILL_NAME}" ]] || fail "skills/${SKILL_NAME} ausente no branch ${branch}."
+    # Deploy inicial COMPLETO (inclui scripts). O sync subsequente preserva scripts/.
+    rm -rf "$SKILL_DEST"; cp -r "$BRAIN_DIR/skills/${SKILL_NAME}" "$SKILL_DEST"
+    [[ -f "$BRAIN_DIR/install/templates/AGENTS-nina.md" ]] && cp "$BRAIN_DIR/install/templates/AGENTS-nina.md" "${WS_ROOT}/AGENTS.md"
+    [[ -f "$BRAIN_DIR/install/templates/SOUL-nina.md" ]]   && cp "$BRAIN_DIR/install/templates/SOUL-nina.md"   "${WS_ROOT}/SOUL.md"
     chmod +x "$SKILL_DEST/scripts/"*.sh 2>/dev/null || true
-    ok "Skill ${SKILL_NAME} instalada em ${SKILL_DEST}."
+    ok "Skill ${SKILL_NAME} instalada (branch ${branch}) em ${SKILL_DEST}."
 }
 _install_skill
 # Fallback: se templates não vieram, usa o identity da skill como SOUL.
@@ -190,6 +213,12 @@ NINA_TOOLS_SECRET=${NINA_TOOLS_SECRET:-}
 HOOKS_TOKEN=${HOOKS_TOKEN}
 INGRESS_URL=${INGRESS_URL:-}
 INSTANCE_ID=${INSTANCE_ID:-}
+# Brain Build (T3) — pull do branch nina-brain (read-only)
+GITHUB_BRAIN_TOKEN=${GITHUB_BRAIN_TOKEN:-}
+BRAIN_REPO=${SKILL_REPO}
+BRAIN_BRANCH=${BRAIN_BRANCH}
+BRAIN_DIR=${BRAIN_DIR}
+SKILL_DEST=${SKILL_DEST}
 EOF
 chmod 600 "$ENV_FILE"
 ok "Env persistido em ${ENV_FILE}."
@@ -298,8 +327,12 @@ ok "Instância registrada: ${INSTANCE_ID}"
 # PASSO 11 — Cron heartbeat (*/5): re-detecta ingress + manda system_prompt
 # ═══════════════════════════════════════════════════════════════════════════════
 _HB_LINE="*/5 * * * * /usr/bin/env bash ${SKILL_DEST}/scripts/heartbeat.sh >> ${LOG_DIR}/heartbeat.log 2>&1"
-( crontab -l 2>/dev/null | grep -v "skills/${SKILL_NAME}/scripts/heartbeat.sh" ; echo "$_HB_LINE" ) | crontab - 2>/dev/null \
-    && ok "Cron heartbeat */5 registrado." || warn "Falha ao registrar cron heartbeat."
+_BS_LINE="*/2 * * * * /usr/bin/env bash ${SKILL_DEST}/scripts/brain_sync.sh >> ${LOG_DIR}/brain_sync.log 2>&1"
+( crontab -l 2>/dev/null \
+    | grep -v "skills/${SKILL_NAME}/scripts/heartbeat.sh" \
+    | grep -v "skills/${SKILL_NAME}/scripts/brain_sync.sh" \
+  ; echo "$_HB_LINE" ; echo "$_BS_LINE" ) | crontab - 2>/dev/null \
+    && ok "Crons registrados (heartbeat */5 + brain-sync */2)." || warn "Falha ao registrar crons."
 
 echo
 ok "=========================================="
