@@ -83,6 +83,75 @@ export type Database = {
           },
         ]
       }
+      brain_knowledge: {
+        Row: {
+          content_md: string
+          created_at: string
+          id: string
+          owner_user_id: string
+          position: number
+          slug: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          content_md: string
+          created_at?: string
+          id?: string
+          owner_user_id?: string
+          position?: number
+          slug: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          content_md?: string
+          created_at?: string
+          id?: string
+          owner_user_id?: string
+          position?: number
+          slug?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      brain_products: {
+        Row: {
+          created_at: string
+          details_md: string | null
+          id: string
+          is_active: boolean
+          name: string
+          owner_user_id: string
+          position: number
+          summary: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          details_md?: string | null
+          id?: string
+          is_active?: boolean
+          name: string
+          owner_user_id?: string
+          position?: number
+          summary?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          details_md?: string | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          owner_user_id?: string
+          position?: number
+          summary?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       contacts: {
         Row: {
           blocked_at: string | null
@@ -700,6 +769,7 @@ export type Database = {
           async_booking_enabled: boolean | null
           audio_response_enabled: boolean | null
           auto_response_enabled: boolean
+          brain_identity: Json
           brain_provider: string
           brain_repo_url: string | null
           business_days: number[]
@@ -743,6 +813,7 @@ export type Database = {
           async_booking_enabled?: boolean | null
           audio_response_enabled?: boolean | null
           auto_response_enabled?: boolean
+          brain_identity?: Json
           brain_provider?: string
           brain_repo_url?: string | null
           business_days?: number[]
@@ -786,6 +857,7 @@ export type Database = {
           async_booking_enabled?: boolean | null
           audio_response_enabled?: boolean | null
           auto_response_enabled?: boolean
+          brain_identity?: Json
           brain_provider?: string
           brain_repo_url?: string | null
           business_days?: number[]
@@ -821,6 +893,39 @@ export type Database = {
           whatsapp_business_account_id?: string | null
           whatsapp_phone_number_id?: string | null
           whatsapp_verify_token?: string | null
+        }
+        Relationships: []
+      }
+      nina_test_results: {
+        Row: {
+          content: string | null
+          conversation_id: string | null
+          created_at: string
+          id: string
+          owner_user_id: string
+          run_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          content?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          owner_user_id?: string
+          run_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          id?: string
+          owner_user_id?: string
+          run_id?: string
+          status?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -1316,6 +1421,10 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      set_secret: {
+        Args: { secret_name: string; secret_value: string }
+        Returns: undefined
       }
       update_client_memory: {
         Args: { p_contact_id: string; p_new_memory: Json }
