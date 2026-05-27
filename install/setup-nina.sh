@@ -37,9 +37,12 @@ GW_PORT=18789
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "${WS_ROOT}/skills"
 
-# ── Carregar env (install_env do installer + .env de re-execução) ─────────────
-[[ -f "${STATE_DIR}/.install_env.sh" ]] && { set -a; source "${STATE_DIR}/.install_env.sh"; set +a; }
+# ── Carregar env ─────────────────────────────────────────────────────────────
+# Ordem importa: o .env (re-execução) entra PRIMEIRO como base; o .install_env.sh
+# (valores frescos do setup-installer) entra POR ÚLTIMO e SEMPRE sobrescreve —
+# assim um install fresco vence um .env velho de uma instalação anterior na VPS.
 [[ -f "$ENV_FILE" ]] && { info "Reusando ${ENV_FILE} (re-execução)."; set -a; source "$ENV_FILE"; set +a; }
+[[ -f "${STATE_DIR}/.install_env.sh" ]] && { set -a; source "${STATE_DIR}/.install_env.sh"; set +a; }
 
 : "${PANEL_BASE_URL:?PANEL_BASE_URL ausente (rode via setup-installer)}"
 : "${PANEL_TOKEN:?PANEL_TOKEN ausente}"
