@@ -499,15 +499,33 @@ async function processQueueItem(
   // o lead não fica sem resposta). O cap/timeout síncrono do F2.1 não se aplica.
   if (settings?.brain_provider === 'openclaw') {
     const heartbeatCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    const { data: instance } = await supabase
+    // Single-tenant (1 remix = 1 instância): resolve por owner quando user_id existe;
+    // senão (user_id null/undefined OU nenhuma do owner) usa QUALQUER instância online
+    // com heartbeat recente. Não falha só porque nina_settings.user_id é null.
+    const onlineInstances = () => supabase
       .from('instances')
       .select('id, ingress_url, hooks_token')
-      .eq('owner_user_id', settings.user_id)
       .eq('status', 'online')
       .gt('last_heartbeat', heartbeatCutoff)
       .order('last_heartbeat', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .limit(1);
+
+    let instance: { id: string; ingress_url: string | null; hooks_token: string | null } | null = null;
+    if (settings.user_id) {
+      const byOwner = await onlineInstances().eq('owner_user_id', settings.user_id).maybeSingle();
+      instance = byOwner.data;
+    }
+    if (!instance) {
+      const anyOnline = await onlineInstances().maybeSingle();
+      instance = anyOnline.data;
+      if (instance) {
+        console.log(
+          `[Nina] OpenClaw instance resolvida por fallback single-tenant (${settings.user_id
+            ? `nenhuma instância do owner ${settings.user_id}`
+            : 'nina_settings.user_id null'} — usei qualquer instância online).`
+        );
+      }
+    }
 
     if (instance?.ingress_url && instance?.hooks_token) {
       const runId = crypto.randomUUID();
@@ -599,7 +617,10 @@ async function processQueueItem(
       }
       // Não despachou: NÃO marca processed_by_nina e segue pro Lovable síncrono abaixo.
     } else {
-      console.log('[Nina] sem instance openclaw ativa -> fallback Lovable AI');
+      const why = !instance
+        ? 'nenhuma instância OpenClaw online com heartbeat < 10min'
+        : 'instância online sem ingress_url/hooks_token (registro incompleto)';
+      console.log(`[Nina] ${why} -> fallback Lovable AI`);
     }
   }
   // ────────────────────────────────────────────────────────────────────────────
