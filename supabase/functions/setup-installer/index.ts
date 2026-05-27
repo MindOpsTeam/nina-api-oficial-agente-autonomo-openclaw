@@ -62,6 +62,8 @@ Deno.serve(async (req: Request) => {
   const panelToken = (await getSecret("PANEL_TOKEN")) ?? "";
   const ninaToolsSecret = (await getSecret("NINA_TOOLS_SECRET")) ?? "";
   const anthropicKey = (await getSecret("ANTHROPIC_API_KEY")) ?? "";
+  // T3 — token read-only pra VPS puxar o branch nina-brain (repo privado).
+  const brainToken = (await getSecret("GITHUB_BRAIN_TOKEN")) ?? "";
 
   const envLines = [
     `export PANEL_BASE_URL=${shEscape(panelBaseUrl)}`,
@@ -70,6 +72,7 @@ Deno.serve(async (req: Request) => {
     `export ANTHROPIC_API_KEY=${shEscape(anthropicKey)}`,
     `export NINA_TOOLS_URL=${shEscape(ninaToolsUrl)}`,
     `export NINA_TOOLS_SECRET=${shEscape(ninaToolsSecret)}`,
+    `export GITHUB_BRAIN_TOKEN=${shEscape(brainToken)}`,
   ];
 
   const script = `#!/usr/bin/env bash
