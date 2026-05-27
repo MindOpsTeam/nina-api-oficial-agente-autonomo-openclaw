@@ -5,6 +5,7 @@ import InstallBlock from './cerebro/InstallBlock';
 import StatusBlock from './cerebro/StatusBlock';
 import TestBlock from './cerebro/TestBlock';
 import ActivateBlock from './cerebro/ActivateBlock';
+import TrainBlock from './cerebro/TrainBlock';
 
 const TEXT = {
   title: 'Cérebro',
@@ -35,6 +36,7 @@ const Cerebro: React.FC = () => {
         />
         <TestBlock status={status} />
         <ActivateBlock status={status} />
+        <TrainBlock />
       </div>
     </div>
   );
