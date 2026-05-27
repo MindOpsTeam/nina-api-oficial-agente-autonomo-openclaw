@@ -21,6 +21,10 @@ import {
   validatePanelToken,
 } from "../_shared/panel.ts";
 
+// EdgeRuntime é global no runtime de Edge Functions do Supabase (pode não existir
+// em outros runtimes — por isso checamos antes de usar).
+declare const EdgeRuntime: { waitUntil(p: Promise<unknown>): void } | undefined;
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return errorResponse("Method not allowed", 405);
@@ -101,6 +105,23 @@ Deno.serve(async (req: Request) => {
   if (insErr || !queued) {
     console.error("[nina-reply] send_queue insert error:", insErr);
     return errorResponse("Erro ao enfileirar resposta", 500);
+  }
+
+  // Aciona o whatsapp-sender pra DRENAR a fila — mesmo padrão do nina-orchestrator
+  // (mesma função alvo + header service-role). No caminho OpenClaw assíncrono
+  // ninguém mais aciona o envio; sem isto a resposta fica 'pending' pra sempre.
+  // EdgeRuntime.waitUntil mantém o disparo vivo após a resposta, sem bloqueá-la.
+  // NÃO altera o whatsapp-sender nem o schema da fila — só ACIONA o sender existente.
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const triggerSender = fetch(`${supabaseUrl}/functions/v1/whatsapp-sender`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
+    body: JSON.stringify({ triggered_by: "nina-reply" }),
+  }).catch((err) => console.error("[nina-reply] Error triggering whatsapp-sender:", err));
+
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+    EdgeRuntime.waitUntil(triggerSender);
   }
 
   return jsonResponse({ queued: true, send_queue_id: queued.id });
