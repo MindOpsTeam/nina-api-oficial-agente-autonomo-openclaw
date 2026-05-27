@@ -65,6 +65,24 @@ Deno.serve(async (req: Request) => {
   // T3 — token read-only pra VPS puxar o branch nina-brain (repo privado).
   const brainToken = (await getSecret("GITHUB_BRAIN_TOKEN")) ?? "";
 
+  // SKILL_REPO: repo de cérebro DO CLIENTE (a VPS instala/sincroniza a skill do
+  // branch nina-brain DESSE repo, não do original hardcoded). Fallback single-tenant
+  // (igual orchestrator/brain-build): owner -> global (user_id NULL) -> qualquer linha.
+  // URL tokenless (o brain_sync injeta o GITHUB_BRAIN_TOKEN inline no fetch).
+  let brainRepoUrl = "";
+  {
+    const byOwner = await admin.from("nina_settings").select("brain_repo_url").eq("user_id", row.owner_user_id).maybeSingle();
+    brainRepoUrl = (byOwner.data?.brain_repo_url ?? "").trim();
+    if (!brainRepoUrl) {
+      const global = await admin.from("nina_settings").select("brain_repo_url").is("user_id", null).maybeSingle();
+      brainRepoUrl = (global.data?.brain_repo_url ?? "").trim();
+    }
+    if (!brainRepoUrl) {
+      const anyRow = await admin.from("nina_settings").select("brain_repo_url").limit(1).maybeSingle();
+      brainRepoUrl = (anyRow.data?.brain_repo_url ?? "").trim();
+    }
+  }
+
   const envLines = [
     `export PANEL_BASE_URL=${shEscape(panelBaseUrl)}`,
     `export PANEL_TOKEN=${shEscape(panelToken)}`,
@@ -74,6 +92,12 @@ Deno.serve(async (req: Request) => {
     `export NINA_TOOLS_SECRET=${shEscape(ninaToolsSecret)}`,
     `export GITHUB_BRAIN_TOKEN=${shEscape(brainToken)}`,
   ];
+
+  // Só emite SKILL_REPO se houver brain_repo_url; senão o setup-nina.sh cai no
+  // default (skill genérica) — comportamento atual, sem quebrar.
+  if (brainRepoUrl) {
+    envLines.push(`export SKILL_REPO=${shEscape(brainRepoUrl)}`);
+  }
 
   const script = `#!/usr/bin/env bash
 # Nina SDR — installer (gerado pelo painel)
