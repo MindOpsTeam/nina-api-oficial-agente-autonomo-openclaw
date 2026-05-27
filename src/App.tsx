@@ -14,6 +14,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 
 import { CompanySettingsProvider } from './hooks/useCompanySettings';
 import { AuthProvider } from './hooks/useAuth';
+import ErrorBoundary from './components/ErrorBoundary';
 import { Toaster } from 'sonner';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { useOnboardingStatus } from './hooks/useOnboardingStatus';
@@ -57,41 +58,46 @@ const AppLayout: React.FC = () => {
 
 const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <CompanySettingsProvider>
-        <BrowserRouter>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/auth" element={<Auth />} />
-            
-            {/* Protected Routes (With Sidebar) */}
-            <Route element={
-              <ProtectedRoute>
-                <AppLayout />
-              </ProtectedRoute>
-            }>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/pipeline" element={<Kanban />} />
-              <Route path="/chat" element={<ChatInterface />} />
-              <Route path="/contacts" element={<Contacts />} />
-              <Route path="/scheduling" element={<Scheduling />} />
-              <Route path="/team" element={<Team />} />
-              <Route path="/cerebro" element={<Cerebro />} />
-              <Route path="/settings" element={<Settings />} />
-            </Route>
-            
-            {/* Catch all - redirect to dashboard */}
-            <Route path="*" element={<Navigate to="/dashboard" replace />} />
-          </Routes>
-        </BrowserRouter>
-        <Toaster 
-          position="top-right"
-          richColors
-          theme="dark"
-        />
-      </CompanySettingsProvider>
-    </AuthProvider>
+    // BrowserRouter é o wrapper mais externo: garante que TODO consumidor de
+    // router (ProtectedRoute, Sidebar, providers) esteja dentro do contexto Router.
+    // ErrorBoundary envolve tudo para que erros de render virem fallback, não tela branca.
+    <ErrorBoundary>
+      <BrowserRouter>
+        <AuthProvider>
+          <CompanySettingsProvider>
+            <Routes>
+              {/* Public Routes */}
+              <Route path="/auth" element={<Auth />} />
+
+              {/* Protected Routes (With Sidebar) */}
+              <Route element={
+                <ProtectedRoute>
+                  <AppLayout />
+                </ProtectedRoute>
+              }>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/pipeline" element={<Kanban />} />
+                <Route path="/chat" element={<ChatInterface />} />
+                <Route path="/contacts" element={<Contacts />} />
+                <Route path="/scheduling" element={<Scheduling />} />
+                <Route path="/team" element={<Team />} />
+                <Route path="/cerebro" element={<Cerebro />} />
+                <Route path="/settings" element={<Settings />} />
+              </Route>
+
+              {/* Catch all - redirect to dashboard */}
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
+            </Routes>
+            <Toaster
+              position="top-right"
+              richColors
+              theme="dark"
+            />
+          </CompanySettingsProvider>
+        </AuthProvider>
+      </BrowserRouter>
+    </ErrorBoundary>
   );
 };
 
