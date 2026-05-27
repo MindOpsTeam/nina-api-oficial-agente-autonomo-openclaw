@@ -1,28 +1,22 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Save, Github, ShieldCheck, ShieldAlert, KeyRound } from 'lucide-react';
+import { Loader2, Save, Github, KeyRound, ExternalLink } from 'lucide-react';
 import { Button } from '../../Button';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useNinaSettings } from '@/hooks/useNinaSettings';
-
-const PAT_FLAG_KEY = 'nina_github_pat_configured';
+import { useSecretsStatus } from '@/hooks/useSecretsStatus';
+import WriteOnlySecretField from './WriteOnlySecretField';
 
 const TEXT = {
   repoLabel: 'Repositório do cérebro (GitHub)',
   repoPlaceholder: 'https://github.com/sua-org/seu-repo',
   repoHint: 'O brain-build commita os arquivos da skill no branch dedicado "nina-brain" deste repo.',
-  saveRepo: 'Salvar repositório',
   repoSaved: 'Repositório salvo',
   repoError: 'Erro ao salvar repositório',
   patLabel: 'PAT do GitHub (token de acesso)',
   patPlaceholder: 'ghp_… (salvo no Vault, nunca exibido de volta)',
-  patHint: 'O token é enviado direto para um cofre seguro (Vault) e nunca é gravado no navegador nem no banco.',
-  savePat: 'Salvar token',
   patSaved: 'Token salvo com segurança',
-  patEmpty: 'Cole o PAT do GitHub primeiro',
   patError: 'Erro ao salvar o token. Verifique e tente novamente.',
-  configured: 'Configurado',
-  notConfigured: 'Não configurado',
 } as const;
 
 const inputClass =
@@ -30,12 +24,8 @@ const inputClass =
 
 const RepoConfig: React.FC = () => {
   const { values, loading, saving, save } = useNinaSettings();
+  const { status, refetch, recordSaved } = useSecretsStatus();
   const [repoUrl, setRepoUrl] = useState('');
-  const [pat, setPat] = useState('');
-  const [savingPat, setSavingPat] = useState(false);
-  const [patConfigured, setPatConfigured] = useState(
-    () => typeof window !== 'undefined' && window.localStorage.getItem(PAT_FLAG_KEY) === 'true'
-  );
 
   useEffect(() => {
     setRepoUrl(values.brain_repo_url);
@@ -46,26 +36,18 @@ const RepoConfig: React.FC = () => {
     toast[ok ? 'success' : 'error'](ok ? TEXT.repoSaved : TEXT.repoError);
   };
 
-  const handleSavePat = async () => {
-    if (!pat.trim()) {
-      toast.error(TEXT.patEmpty);
-      return;
-    }
-    setSavingPat(true);
+  const handleSavePat = async (value: string): Promise<boolean> => {
     try {
-      const { error } = await supabase.functions.invoke('save-github-token', {
-        body: { value: pat.trim() },
-      });
+      const { error } = await supabase.functions.invoke('save-github-token', { body: { value } });
       if (error) throw error;
-      window.localStorage.setItem(PAT_FLAG_KEY, 'true');
-      setPatConfigured(true);
-      setPat('');
+      recordSaved('GITHUB_BRAIN_TOKEN');
+      await refetch();
       toast.success(TEXT.patSaved);
+      return true;
     } catch (err) {
       console.error('[RepoConfig] Erro ao salvar PAT:', err);
       toast.error(TEXT.patError);
-    } finally {
-      setSavingPat(false);
+      return false;
     }
   };
 
@@ -100,34 +82,28 @@ const RepoConfig: React.FC = () => {
       </div>
 
       <div className="border-t border-slate-800 pt-5">
-        <div className="flex items-center justify-between mb-1.5">
-          <label className="flex items-center gap-2 text-xs font-medium text-slate-400">
-            <KeyRound className="w-4 h-4" />
-            {TEXT.patLabel}
-          </label>
-          <span
-            className={`flex items-center gap-1.5 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-              patConfigured ? 'bg-emerald-500/10 text-emerald-400' : 'bg-amber-500/10 text-amber-400'
-            }`}
-          >
-            {patConfigured ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
-            {patConfigured ? TEXT.configured : TEXT.notConfigured}
-          </span>
-        </div>
-        <div className="flex gap-2">
-          <input
-            type="password"
-            value={pat}
-            onChange={(e) => setPat(e.target.value)}
-            placeholder={TEXT.patPlaceholder}
-            autoComplete="off"
-            className={inputClass}
-          />
-          <Button onClick={handleSavePat} disabled={savingPat || !pat.trim()} className="flex-shrink-0">
-            {savingPat ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          </Button>
-        </div>
-        <p className="text-xs text-slate-500 mt-1.5">{TEXT.patHint}</p>
+        <WriteOnlySecretField
+          label={TEXT.patLabel}
+          placeholder={TEXT.patPlaceholder}
+          configured={status.GITHUB_BRAIN_TOKEN}
+          onSave={handleSavePat}
+          icon={<KeyRound className="w-4 h-4" />}
+          instruction={
+            <span>
+              Crie em{' '}
+              <a
+                href="https://github.com/settings/tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 text-cyan-400 hover:underline"
+              >
+                github.com/settings/tokens
+                <ExternalLink className="w-3 h-3" />
+              </a>{' '}
+              com escopo <code className="text-slate-300">repo</code> (acesso de escrita ao repositório do cérebro).
+            </span>
+          }
+        />
       </div>
     </div>
   );
