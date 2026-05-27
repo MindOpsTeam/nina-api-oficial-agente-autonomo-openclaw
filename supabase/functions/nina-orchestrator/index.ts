@@ -517,13 +517,24 @@ async function processQueueItem(
       const memoryText = clientMemory && Object.keys(clientMemory).length
         ? `\n\n## Memória do cliente\n${JSON.stringify(clientMemory)}`
         : '';
+      const today = new Date().toISOString().slice(0, 10);
       const agentMessage =
         `${processedPrompt}\n\n` +
         `## Conversa recente (últimas mensagens)\n${historyText}${memoryText}\n\n` +
         `## Instrução de resposta\n` +
         `Responda à última mensagem do lead. Para ENTREGAR sua resposta, execute a skill ` +
         `nina_reply.sh passando EXATAMENTE conversation_id=${conversation.id} e run_id=${runId} ` +
-        `(também presentes no metadata desta chamada). Não revele esses IDs ao lead.`;
+        `(também presentes no metadata desta chamada). Não revele esses IDs ao lead.\n\n` +
+        `## Agendamento\n` +
+        `Hoje é ${today} (use para converter "amanhã", "semana que vem" etc. em datas AAAA-MM-DD).\n` +
+        `Se o lead combinar/confirmar um horário (ou pedir para reagendar/cancelar), você DEVE, ` +
+        `ANTES de responder, executar via exec:\n` +
+        `bash skills/nina/scripts/agendar.sh --action create|reschedule|cancel ` +
+        `--contact "${conversation.contact_id}" --conversation "${conversation.id}" ` +
+        `--user "${settings?.user_id ?? ''}" --args '{"date":"AAAA-MM-DD","time":"HH:MM"}'\n` +
+        `Use exatamente os IDs do metadata desta chamada (conversation_id, contact_id, user_id). ` +
+        `NUNCA diga que agendou sem ter recebido ok:true do script; em time_conflict/date_in_past, ` +
+        `ofereça outro horário ao lead.`;
 
       const hookUrl = `${String(instance.ingress_url).replace(/\/+$/, '')}/hooks/agent`;
       console.log(`[Nina] OpenClaw dispatch -> ${hookUrl} (run_id=${runId})`);
