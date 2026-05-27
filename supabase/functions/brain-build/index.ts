@@ -115,12 +115,24 @@ Deno.serve(async (req: Request) => {
 
   const admin = adminClient();
 
-  // 1) Carrega os dados do owner.
-  const { data: settings } = await admin
-    .from("nina_settings")
-    .select("sdr_name, company_name, system_prompt_override, brain_identity, brain_repo_url")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  // 1) Carrega os dados do owner. Single-tenant: a linha de nina_settings
+  //    frequentemente tem user_id=NULL (global). Espelha o FALLBACK TRIPLO do
+  //    orchestrator: (1) user_id=user.id -> (2) global (user_id IS NULL) ->
+  //    (3) qualquer linha existente.
+  const SETTINGS_COLS = "sdr_name, company_name, system_prompt_override, brain_identity, brain_repo_url";
+  let settings: any = null;
+
+  const byUser = await admin.from("nina_settings").select(SETTINGS_COLS).eq("user_id", user.id).maybeSingle();
+  settings = byUser.data;
+
+  if (!settings) {
+    const global = await admin.from("nina_settings").select(SETTINGS_COLS).is("user_id", null).maybeSingle();
+    settings = global.data;
+  }
+  if (!settings) {
+    const anyRow = await admin.from("nina_settings").select(SETTINGS_COLS).limit(1).maybeSingle();
+    settings = anyRow.data;
+  }
 
   const repoUrl = v(settings?.brain_repo_url);
   if (!repoUrl) return errorResponse("brain_repo_url não configurado", 400);
