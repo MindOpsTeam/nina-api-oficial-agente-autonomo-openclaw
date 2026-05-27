@@ -517,7 +517,14 @@ async function processQueueItem(
       const memoryText = clientMemory && Object.keys(clientMemory).length
         ? `\n\n## Memória do cliente\n${JSON.stringify(clientMemory)}`
         : '';
-      const today = new Date().toISOString().slice(0, 10);
+      // Data de hoje em BRT (America/Sao_Paulo), mesmo timeZone do {{ data_hora }}.
+      // en-CA produz o formato ISO AAAA-MM-DD que o agendar.sh espera em --args.
+      const today = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Sao_Paulo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).format(new Date());
       const agentMessage =
         `${processedPrompt}\n\n` +
         `## Conversa recente (últimas mensagens)\n${historyText}${memoryText}\n\n` +
