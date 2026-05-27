@@ -4,9 +4,14 @@
  * enfileira em send_queue, reaproveitando o fluxo do whatsapp-sender.
  * NÃO mexe no whatsapp-sender nem no schema das filas — só INSERE em send_queue.
  *
+ * F5b: runs de TESTE (run_id com prefixo 'test-') NÃO vão pro send_queue — são
+ * gravados na tabela dedicada nina_test_results (lida pela edge fn nina-test).
+ * Garante que a resposta de teste jamais seja enviada a um WhatsApp real.
+ * O caminho de PRODUÇÃO (run_id sem 'test-') segue 100% inalterado.
+ *
  * Auth: X-Panel-Token.
  * Body: { conversation_id, run_id, content, status }  (status = 'sent' | 'error')
- * Retorna: { queued: true, send_queue_id } ou 204 se não houver o que enviar.
+ * Retorna: { queued: true, send_queue_id } | { test: true } | 204.
  */
 import {
   adminClient,
@@ -37,6 +42,24 @@ Deno.serve(async (req: Request) => {
   const runId = body.run_id;
   const content = (body.content ?? "").trim();
   const agentStatus = body.status === "error" ? "error" : "sent";
+
+  // ── F5b: run de TESTE — grava no canal dedicado, NUNCA no send_queue ────────
+  // A row já foi pré-criada (status='pending') pela edge fn nina-test; aqui só
+  // preenchemos content/status. Retorna cedo — não toca send_queue de jeito nenhum.
+  if (runId && runId.startsWith("test-")) {
+    const admin = adminClient();
+    const { error: updErr } = await admin
+      .from("nina_test_results")
+      .update({ content, status: agentStatus, updated_at: new Date().toISOString() })
+      .eq("run_id", runId);
+    if (updErr) {
+      console.error("[nina-reply] nina_test_results update error:", updErr);
+      return errorResponse("Erro ao registrar resultado de teste", 500);
+    }
+    console.log(`[nina-reply] resultado de teste registrado (run_id=${runId}, status=${agentStatus})`);
+    return jsonResponse({ test: true, run_id: runId });
+  }
+  // ────────────────────────────────────────────────────────────────────────────
 
   if (!conversationId) return errorResponse("conversation_id obrigatório", 400);
 
