@@ -135,8 +135,9 @@ if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
       "anthropic": {
         "baseUrl": "https://api.anthropic.com",
         "apiKey": { "source": "env", "provider": "anthropic", "id": "ANTHROPIC_API_KEY" },
+        "maxTokens": 4096,
         "models": [
-          { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "api": "anthropic-messages", "input": ["text", "image"] }
+          { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6", "api": "anthropic-messages", "input": ["text", "image"], "maxTokens": 4096 }
         ]
       }
     }
