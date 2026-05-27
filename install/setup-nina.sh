@@ -132,10 +132,15 @@ done
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 5 — Provider Anthropic (claude-sonnet-4-6)
 # ═══════════════════════════════════════════════════════════════════════════════
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-    info "Configurando provider Anthropic..."
-    _AP=$(mktemp /tmp/nina-anthropic-XXXXXX.json5)
-    cat > "$_AP" <<'ANTEOF'
+# Registrado SEMPRE (não gateado pela chave). apiKey é source=env: registrar
+# sem a chave é inofensivo — o agente só não autentica até a ANTHROPIC_API_KEY
+# aparecer no env. Assim, adicionar/rotacionar a chave depois (via heartbeat
+# self-heal: heartbeat.sh atualiza o .env e reinicia o gateway) funciona SEM
+# re-install. Antes isto era gateado por 'if chave presente' -> instalar sem a
+# chave deixava o modelo não-registrado pra sempre.
+info "Configurando provider Anthropic..."
+_AP=$(mktemp /tmp/nina-anthropic-XXXXXX.json5)
+cat > "$_AP" <<'ANTEOF'
 {
   "models": {
     "providers": {
@@ -153,13 +158,11 @@ if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   "agents": { "defaults": { "model": { "primary": "anthropic/claude-sonnet-4-6" } } }
 }
 ANTEOF
-    openclaw config patch --file "$_AP" 2>&1 | tail -3 || warn "config patch Anthropic falhou."
-    rm -f "$_AP"
-    openclaw models set anthropic/claude-sonnet-4-6 2>/dev/null || warn "models set falhou."
-    ok "Anthropic configurado (claude-sonnet-4-6)."
-else
-    warn "ANTHROPIC_API_KEY ausente — o agente não conseguirá pensar até configurar um provider."
-fi
+openclaw config patch --file "$_AP" 2>&1 | tail -3 || warn "config patch Anthropic falhou."
+rm -f "$_AP"
+openclaw models set anthropic/claude-sonnet-4-6 2>/dev/null || warn "models set falhou."
+ok "Anthropic configurado (claude-sonnet-4-6)."
+[[ -z "${ANTHROPIC_API_KEY:-}" ]] && warn "ANTHROPIC_API_KEY vazia agora — o agente só pensará quando a chave for configurada no /cerebro (propaga via heartbeat em ~5min)."
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 6 — Instalar skill nina + AGENTS.md/SOUL.md
