@@ -510,22 +510,29 @@ async function processQueueItem(
       .order('last_heartbeat', { ascending: false })
       .limit(1);
 
-    let instance: { id: string; ingress_url: string | null; hooks_token: string | null } | null = null;
-    if (settings.user_id) {
-      const byOwner = await onlineInstances().eq('owner_user_id', settings.user_id).maybeSingle();
-      instance = byOwner.data;
-    }
-    if (!instance) {
-      const anyOnline = await onlineInstances().maybeSingle();
-      instance = anyOnline.data;
-      if (instance) {
-        console.log(
-          `[Nina] OpenClaw instance resolvida por fallback single-tenant (${settings.user_id
-            ? `nenhuma instância do owner ${settings.user_id}`
-            : 'nina_settings.user_id null'} — usei qualquer instância online).`
-        );
+    type OcInstance = { id: string; ingress_url: string | null; hooks_token: string | null };
+    // Resolve a instância OpenClaw online (owner -> qualquer, single-tenant).
+    // Reutilizável: o dispatch re-resolve FRESH no retry de URL stale (ponte GAP7).
+    const resolveInstance = async (): Promise<OcInstance | null> => {
+      let inst: OcInstance | null = null;
+      if (settings.user_id) {
+        const byOwner = await onlineInstances().eq('owner_user_id', settings.user_id).maybeSingle();
+        inst = byOwner.data;
       }
-    }
+      if (!inst) {
+        const anyOnline = await onlineInstances().maybeSingle();
+        inst = anyOnline.data;
+        if (inst) {
+          console.log(
+            `[Nina] OpenClaw instance resolvida por fallback single-tenant (${settings.user_id
+              ? `nenhuma instância do owner ${settings.user_id}`
+              : 'nina_settings.user_id null'} — usei qualquer instância online).`
+          );
+        }
+      }
+      return inst;
+    };
+    const instance = await resolveInstance();
 
     if (instance?.ingress_url && instance?.hooks_token) {
       const runId = crypto.randomUUID();
@@ -565,52 +572,65 @@ async function processQueueItem(
         `NUNCA diga que agendou/reagendou/cancelou sem ter recebido ok:true do script; ` +
         `em time_conflict/date_in_past, ofereça outro horário ao lead.`;
 
-      const hookUrl = `${String(instance.ingress_url).replace(/\/+$/, '')}/hooks/agent`;
-      console.log(`[Nina] OpenClaw dispatch -> ${hookUrl} (run_id=${runId})`);
-
-      // AWAIT o ACK do enfileiramento (deliver:false só ENFILEIRA o run — ack
-      // rápido, NÃO espera os 120s). Timeout curto via AbortController.
-      // Só consideramos despachado num ACK 2xx; qualquer falha (rede / timeout /
-      // status non-2xx, ex.: 401 hooks_token errado ou ingress_url stale) CAI no
-      // fallback síncrono do Lovable AI abaixo, no MESMO turno — lead nunca órfão.
-      // (fetch não rejeita em status de erro, por isso checamos response.ok.)
-      let dispatched = false;
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), HOOKS_DISPATCH_TIMEOUT_MS);
-      try {
-        const hookResp = await fetch(hookUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${instance.hooks_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: agentMessage,
-            name: 'nina_whatsapp',
-            wakeMode: 'now',
-            deliver: false,
-            timeoutSeconds: 120,
-            metadata: {
-              conversation_id: conversation.id,
-              run_id: runId,
-              contact_id: conversation.contact_id,
-              user_id: settings?.user_id ?? null,
+      // Uma tentativa de dispatch (ACK do enfileiramento; deliver:false só ENFILEIRA
+      // o run — ack rápido, NÃO espera os 120s). Timeout curto via AbortController.
+      // fetch não rejeita em status de erro -> checamos response.ok.
+      const tryDispatch = async (ingressUrl: string, hooksToken: string): Promise<boolean> => {
+        const hookUrl = `${String(ingressUrl).replace(/\/+$/, '')}/hooks/agent`;
+        console.log(`[Nina] OpenClaw dispatch -> ${hookUrl} (run_id=${runId})`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), HOOKS_DISPATCH_TIMEOUT_MS);
+        try {
+          const hookResp = await fetch(hookUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${hooksToken}`,
+              'Content-Type': 'application/json',
             },
-          }),
-          signal: controller.signal,
-        });
-        if (hookResp.ok) {
-          dispatched = true;
-        } else {
-          console.error(`[Nina] dispatch /hooks/agent falhou (HTTP ${hookResp.status}) -> fallback Lovable AI`);
+            body: JSON.stringify({
+              message: agentMessage,
+              name: 'nina_whatsapp',
+              wakeMode: 'now',
+              deliver: false,
+              timeoutSeconds: 120,
+              metadata: {
+                conversation_id: conversation.id,
+                run_id: runId,
+                contact_id: conversation.contact_id,
+                user_id: settings?.user_id ?? null,
+              },
+            }),
+            signal: controller.signal,
+          });
+          if (hookResp.ok) return true;
+          console.error(`[Nina] dispatch /hooks/agent falhou (HTTP ${hookResp.status})`);
+          return false;
+        } catch (err) {
+          const reason = (err as Error)?.name === 'AbortError'
+            ? 'timeout'
+            : ((err as Error)?.message ?? 'erro de rede');
+          console.error(`[Nina] dispatch /hooks/agent falhou (${reason})`);
+          return false;
+        } finally {
+          clearTimeout(timeoutId);
         }
-      } catch (err) {
-        const reason = (err as Error)?.name === 'AbortError'
-          ? 'timeout'
-          : ((err as Error)?.message ?? 'erro de rede');
-        console.error(`[Nina] dispatch /hooks/agent falhou (${reason}) -> fallback Lovable AI`);
-      } finally {
-        clearTimeout(timeoutId);
+      };
+
+      // Tentativa 1 com a instância já resolvida.
+      let dispatched = await tryDispatch(instance.ingress_url, instance.hooks_token);
+
+      // Ponte GAP7: se falhou (ex.: ingress_url stale após restart de quick tunnel),
+      // um heartbeat pode TER atualizado a instância. Re-resolve FRESH e tenta 1x se
+      // ingress_url/hooks_token mudaram. (Named tunnel = URL fixa -> não muda, sem
+      // retry desnecessário.) Persistindo a falha -> fallback Lovable AI no mesmo turno
+      // (lead nunca órfão).
+      if (!dispatched) {
+        const fresh = await resolveInstance();
+        if (fresh?.ingress_url && fresh?.hooks_token &&
+            (fresh.ingress_url !== instance.ingress_url || fresh.hooks_token !== instance.hooks_token)) {
+          console.warn(`[Nina] dispatch retry com ingress FRESH (URL stale?) -> ${fresh.ingress_url}`);
+          dispatched = await tryDispatch(fresh.ingress_url, fresh.hooks_token);
+        }
       }
 
       if (dispatched) {
@@ -619,7 +639,7 @@ async function processQueueItem(
         console.log(`[Nina] OpenClaw run enfileirado (run_id=${runId}), aguardando reply async via nina-reply`);
         return;
       }
-      // Não despachou: NÃO marca processed_by_nina e segue pro Lovable síncrono abaixo.
+      // Não despachou (nem no retry): NÃO marca processed_by_nina e segue pro Lovable.
     } else {
       const why = !instance
         ? 'nenhuma instância OpenClaw online com heartbeat < 10min'
