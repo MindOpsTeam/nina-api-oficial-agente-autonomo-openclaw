@@ -33,12 +33,27 @@ REVOKE ALL ON FUNCTION public.trigger_stale_leads() FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.trigger_stale_leads() TO postgres;
 GRANT EXECUTE ON FUNCTION public.trigger_stale_leads() TO service_role;
 
--- Cron diário (13:00 UTC ≈ 10:00 BRT). Idempotente (unschedule by name).
+-- Atualiza o config_schema do catálogo p/ o modelo VALOR+UNIDADE (default 23h).
+-- Antes era {dias_sem_resposta:2}. Idempotente.
+UPDATE public.skill_packs
+   SET config_schema = '{"janela_valor": 23, "janela_unidade": "horas"}'::jsonb,
+       updated_at = now()
+ WHERE slug = 'follow-up';
+
+-- Cron FREQUENTE (a cada 13 min, off-minute). Por quê não diário: com janela em
+-- minutos/horas + guard de 24h da Meta, a elegibilidade é a faixa "parado há >
+-- janela E < 24h" (ex.: 23h..24h = 1h). Um cron diário perderia essa faixa estreita;
+-- */13 pega o lead que cruza a janela em poucos minutos, ainda dentro das 24h.
+-- Off-minute (13) evita coincidir com o reaper (*/2) e outros crons (*/5, */15).
+-- Idempotente (unschedule by name; remove tb o agendamento diário anterior).
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'nina-stale-leads-daily') THEN
     PERFORM cron.unschedule('nina-stale-leads-daily');
   END IF;
+  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'nina-stale-leads-tick') THEN
+    PERFORM cron.unschedule('nina-stale-leads-tick');
+  END IF;
 END $$;
 
-SELECT cron.schedule('nina-stale-leads-daily', '0 13 * * *', $CRON$SELECT public.trigger_stale_leads();$CRON$);
+SELECT cron.schedule('nina-stale-leads-tick', '*/13 * * * *', $CRON$SELECT public.trigger_stale_leads();$CRON$);

@@ -25,7 +25,19 @@ import { corsHeaders, errorResponse, jsonResponse, validatePanelToken } from "..
 import { generateLovableReply } from "../_shared/lovable_reply.ts";
 
 const PER_OWNER_BATCH = 25;          // máx. conversas por owner por execução
-const DEFAULT_DIAS = 2;
+
+// Config = valor + unidade (default 23 horas). PISO de 5min (não dispara
+// follow-up instantâneo). A janela LIVRE da Meta (24h desde o último inbound do
+// lead) é o teto: fora dela só template pago (que não temos) -> NÃO envia.
+const UNIT_MS: Record<string, number> = { minutos: 60_000, horas: 3_600_000, dias: 86_400_000 };
+const FLOOR_MS = 5 * 60_000;
+const META_FREE_WINDOW_MS = 24 * 60 * 60_000;
+function windowMsFromConfig(cfg: any): number {
+  const unitMs = UNIT_MS[String(cfg?.janela_unidade ?? "horas")] ?? UNIT_MS.horas;
+  const valor = Number(cfg?.janela_valor);
+  const ms = (Number.isFinite(valor) && valor > 0 ? valor : 23) * unitMs;
+  return Math.max(FLOOR_MS, ms);
+}
 const FOLLOWUP_INSTRUCTION =
   "\n\n## Tarefa: follow-up\nVocê está RETOMANDO o contato com um lead que parou de responder há alguns dias. " +
   "Escreva UMA mensagem curta, cordial e consultiva — retome de onde a conversa parou, agregue valor com base " +
@@ -62,37 +74,48 @@ Deno.serve(async (req: Request) => {
   let owners = 0;
   let followups = 0;
 
+  const now = Date.now();
   for (const inst of installs ?? []) {
     owners++;
-    const dias = Math.max(1, Number(inst.config?.dias_sem_resposta ?? DEFAULT_DIAS) || DEFAULT_DIAS); // piso 1
-    const cutoffIso = new Date(Date.now() - dias * 24 * 60 * 60 * 1000).toISOString();
+    const windowMs = windowMsFromConfig(inst.config);
+    const staleBeforeIso = new Date(now - windowMs).toISOString();      // parado há > janela
+    const metaFloorIso = new Date(now - META_FREE_WINDOW_MS).toISOString(); // ainda dentro das 24h da Meta
     const settings = await resolveSettings(supabase, inst.owner_user_id ?? null);
 
-    // Conversas paradas do owner: nina, sem atividade há > N dias, sem follow-up
-    // recente (janela N dias).
+    // Conversas elegíveis do owner: nina, paradas há > janela MAS ainda dentro da
+    // janela livre da Meta (24h) — fora das 24h não dá pra mandar free-form.
     const { data: convs } = await supabase
       .from("conversations")
       .select("id, contact_id, metadata, last_message_at")
       .eq("user_id", inst.owner_user_id)
       .eq("status", "nina")
-      .lt("last_message_at", cutoffIso)
+      .lt("last_message_at", staleBeforeIso)
+      .gt("last_message_at", metaFloorIso)
       .order("last_message_at", { ascending: true })
       .limit(PER_OWNER_BATCH);
 
     for (const c of convs ?? []) {
-      // Dedup por janela: pula se já houve follow-up nos últimos N dias.
+      // Dedup por janela: pula se já houve follow-up dentro da janela configurada.
       const lastFu = c.metadata?.last_followup_at;
-      if (lastFu && new Date(lastFu) > new Date(cutoffIso)) continue;
+      if (lastFu && new Date(lastFu).getTime() > now - windowMs) continue;
 
       // Última mensagem precisa ser do LEAD (lead falou por último e sumiu).
       const { data: recent } = await supabase
         .from("messages")
-        .select("from_type, content")
+        .select("from_type, content, created_at")
         .eq("conversation_id", c.id)
         .order("created_at", { ascending: false })
         .limit(20);
       if (!recent || recent.length === 0) continue;
       if (recent[0].from_type !== "user") continue; // Nina (ou humano) falou por último -> não segue
+
+      // GUARD JANELA 24h DA META (custo): só free-form se o último inbound do lead
+      // < 24h. Fora disso, exigiria template pago (não temos) -> NÃO envia.
+      const lastInboundMs = new Date(recent[0].created_at).getTime();
+      if (now - lastInboundMs >= META_FREE_WINDOW_MS) {
+        console.log(`[stale-leads] conversa ${c.id} fora da janela Meta (>24h) — skip (evita custo de template)`);
+        continue;
+      }
 
       const history = recent
         .slice()
@@ -110,7 +133,7 @@ Deno.serve(async (req: Request) => {
         from_type: "nina",
         content,
         status: "pending",
-        metadata: { source: "follow-up", followup_dias: dias },
+        metadata: { source: "follow-up", followup_window_ms: windowMs },
       });
       if (insErr) { console.error("[stale-leads] send_queue insert error:", insErr); continue; }
 
