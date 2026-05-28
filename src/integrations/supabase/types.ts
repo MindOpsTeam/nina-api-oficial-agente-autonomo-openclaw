@@ -1146,6 +1146,21 @@ export type Database = {
         }
         Relationships: []
       }
+      stale_leads_lock: {
+        Row: {
+          id: boolean
+          locked_at: string | null
+        }
+        Insert: {
+          id?: boolean
+          locked_at?: string | null
+        }
+        Update: {
+          id?: boolean
+          locked_at?: string | null
+        }
+        Relationships: []
+      }
       tag_definitions: {
         Row: {
           category: string
@@ -1506,6 +1521,7 @@ export type Database = {
         Args: { secret_name: string; secret_value: string }
         Returns: undefined
       }
+      trigger_stale_leads: { Args: never; Returns: undefined }
       update_client_memory: {
         Args: { p_contact_id: string; p_new_memory: Json }
         Returns: undefined
