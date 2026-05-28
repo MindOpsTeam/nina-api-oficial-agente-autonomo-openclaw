@@ -175,7 +175,8 @@ Deno.serve(async (req: Request) => {
   // O brain_sync na VPS sincroniza esses dirs -> a presença do dir ATIVA o pack
   // (agents.defaults.skills não é fixado; o workspace expõe as skills existentes).
   // Só packs com template embutido (V1: conhecimento) são renderizados aqui.
-  const enabledPacks: string[] = [];
+  const enabledSlugs: string[] = []; // TODOS os packs habilitados (rendered ou não)
+  const renderedPacks: string[] = []; // os que tiveram arquivos escritos neste commit
   const { data: packs } = await admin
     .from("installed_packs")
     .select("pack_slug, enabled")
@@ -183,13 +184,24 @@ Deno.serve(async (req: Request) => {
     .eq("enabled", true);
   for (const p of packs ?? []) {
     const slug = safeSlug(p.pack_slug);
+    enabledSlugs.push(slug);
     const packFiles = getPackFiles(p.pack_slug);
     if (packFiles.length === 0) continue; // pack de ferramenta (SP3) — sem template aqui
     for (const pf of packFiles) {
       files.push({ path: `${SKILLS_ROOT}/${slug}/${pf.path}`, content: pf.content });
     }
-    enabledPacks.push(slug);
+    renderedPacks.push(slug);
   }
+
+  // Manifesto consumido pelo prune do brain_sync (B1/c1): 'enabled' = packs ligados;
+  // 'managed' = TODOS os slugs do catálogo. O prune só remove dirs em managed E
+  // NÃO em enabled -> nunca toca uma skill criada por fora do catálogo.
+  const { data: catalog } = await admin.from("skill_packs").select("slug");
+  const managedSlugs = (catalog ?? []).map((c: any) => safeSlug(c.slug));
+  files.push({
+    path: `${SKILLS_ROOT}/.nina-packs.json`,
+    content: JSON.stringify({ enabled: enabledSlugs, managed: managedSlugs }, null, 2) + "\n",
+  });
 
   // 3) Commita no branch dedicado 'nina-brain' via Git Data API (commit atômico).
   try {
@@ -234,7 +246,8 @@ Deno.serve(async (req: Request) => {
       commit_sha: commit.sha,
       branch: BRAIN_BRANCH,
       files_written: files.map((f) => f.path),
-      enabled_packs: enabledPacks,
+      enabled_packs: enabledSlugs,
+      rendered_packs: renderedPacks,
     });
   } catch (e) {
     console.error("[brain-build] GitHub error:", (e as Error)?.message ?? e);

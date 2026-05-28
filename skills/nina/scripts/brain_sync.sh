@@ -69,17 +69,19 @@ for srcdir in "$SKILLS_SRC"/*/; do
     done
 done
 
-# Prune de packs DESABILITADOS: remove do workspace as skills (≠ nina) que NÃO
-# estão no manifesto skills/.nina-packs.json (escrito pelo brain-build). Só prune
-# se o manifesto existir (nina-brain antigo sem manifesto -> não mexe).
+# Prune de packs DESABILITADOS via manifesto skills/.nina-packs.json (brain-build):
+#  - 'managed' = TODOS os slugs do catálogo; 'enabled' = os ligados.
+#  - Só remove dir que está em MANAGED E NÃO em ENABLED -> nunca toca a 'nina'
+#    nem uma skill criada por fora do catálogo. Só prune se o manifesto existir.
 MANIFEST="$SKILLS_SRC/.nina-packs.json"
 if [[ -f "$MANIFEST" ]]; then
     ENABLED=$(python3 -c "import json;print('\n'.join(json.load(open('$MANIFEST')).get('enabled',[])))" 2>/dev/null || echo "")
+    MANAGED=$(python3 -c "import json;print('\n'.join(json.load(open('$MANIFEST')).get('managed',[])))" 2>/dev/null || echo "")
     for destdir in "$SKILLS_ROOT"/*/; do
         [[ -d "$destdir" ]] || continue
         name="$(basename "$destdir")"
         [[ "$name" == "nina" ]] && continue
-        if ! grep -qxF "$name" <<< "$ENABLED"; then
+        if grep -qxF "$name" <<< "$MANAGED" && ! grep -qxF "$name" <<< "$ENABLED"; then
             rm -rf "$destdir"
             log "pack desabilitado removido do workspace: $name"
         fi
