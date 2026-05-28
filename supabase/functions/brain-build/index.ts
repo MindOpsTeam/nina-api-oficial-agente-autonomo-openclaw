@@ -15,10 +15,12 @@
 import { adminClient, corsHeaders, errorResponse, jsonResponse } from "../_shared/panel.ts";
 import { getSecret } from "../_shared/secrets.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getPackFiles } from "../_shared/pack_templates.ts";
 
 const GH_API = "https://api.github.com";
 const BRAIN_BRANCH = "nina-brain";
 const SKILL_BASE = "skills/nina";
+const SKILLS_ROOT = "skills"; // raiz onde cada pack vira skills/<slug>/
 
 // ── Parsing do repo ─────────────────────────────────────────────────────────
 function parseRepo(url: string): { owner: string; repo: string } | null {
@@ -169,6 +171,38 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  // SP1: renderiza os Skill Packs HABILITADOS do owner em skills/<slug>/.
+  // O brain_sync na VPS sincroniza esses dirs -> a presença do dir ATIVA o pack
+  // (agents.defaults.skills não é fixado; o workspace expõe as skills existentes).
+  // Só packs com template embutido (V1: conhecimento) são renderizados aqui.
+  const enabledSlugs: string[] = []; // TODOS os packs habilitados (rendered ou não)
+  const renderedPacks: string[] = []; // os que tiveram arquivos escritos neste commit
+  const { data: packs } = await admin
+    .from("installed_packs")
+    .select("pack_slug, enabled")
+    .eq("owner_user_id", user.id)
+    .eq("enabled", true);
+  for (const p of packs ?? []) {
+    const slug = safeSlug(p.pack_slug);
+    enabledSlugs.push(slug);
+    const packFiles = getPackFiles(p.pack_slug);
+    if (packFiles.length === 0) continue; // pack de ferramenta (SP3) — sem template aqui
+    for (const pf of packFiles) {
+      files.push({ path: `${SKILLS_ROOT}/${slug}/${pf.path}`, content: pf.content });
+    }
+    renderedPacks.push(slug);
+  }
+
+  // Manifesto consumido pelo prune do brain_sync (B1/c1): 'enabled' = packs ligados;
+  // 'managed' = TODOS os slugs do catálogo. O prune só remove dirs em managed E
+  // NÃO em enabled -> nunca toca uma skill criada por fora do catálogo.
+  const { data: catalog } = await admin.from("skill_packs").select("slug");
+  const managedSlugs = (catalog ?? []).map((c: any) => safeSlug(c.slug));
+  files.push({
+    path: `${SKILLS_ROOT}/.nina-packs.json`,
+    content: JSON.stringify({ enabled: enabledSlugs, managed: managedSlugs }, null, 2) + "\n",
+  });
+
   // 3) Commita no branch dedicado 'nina-brain' via Git Data API (commit atômico).
   try {
     const base = `${GH_API}/repos/${repo.owner}/${repo.repo}`;
@@ -212,6 +246,8 @@ Deno.serve(async (req: Request) => {
       commit_sha: commit.sha,
       branch: BRAIN_BRANCH,
       files_written: files.map((f) => f.path),
+      enabled_packs: enabledSlugs,
+      rendered_packs: renderedPacks,
     });
   } catch (e) {
     console.error("[brain-build] GitHub error:", (e as Error)?.message ?? e);

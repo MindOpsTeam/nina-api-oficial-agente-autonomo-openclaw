@@ -40,22 +40,52 @@ if ! git -C "$BRAIN_DIR" fetch --depth 1 "$AUTH_URL" "$BRAIN_BRANCH" >>"$LOG" 2>
 fi
 OLD=$(git -C "$BRAIN_DIR" rev-parse HEAD 2>/dev/null || echo none)
 git -C "$BRAIN_DIR" reset --hard FETCH_HEAD >>"$LOG" 2>&1 || { log "reset --hard falhou"; exit 0; }
-git -C "$BRAIN_DIR" sparse-checkout reapply >>"$LOG" 2>&1 || true
+# SP1: garante que TODAS as skills (nina + packs) entrem no sparse-checkout.
+git -C "$BRAIN_DIR" sparse-checkout set "skills" "install/templates" >>"$LOG" 2>&1 \
+  || git -C "$BRAIN_DIR" sparse-checkout reapply >>"$LOG" 2>&1 || true
 NEW=$(git -C "$BRAIN_DIR" rev-parse HEAD 2>/dev/null || echo none)
 
 [[ "$OLD" == "$NEW" ]] && { log "brain sem mudanças (${NEW:0:8})"; exit 0; }
 
-SRC="$BRAIN_DIR/skills/nina"
-[[ -d "$SRC" ]] || { log "skills/nina ausente no brain (branch ${BRAIN_BRANCH})"; exit 0; }
-mkdir -p "$SKILL_DEST"
+SKILLS_SRC="$BRAIN_DIR/skills"
+[[ -d "$SKILLS_SRC/nina" ]] || { log "skills/nina ausente no brain (branch ${BRAIN_BRANCH})"; exit 0; }
+SKILLS_ROOT="$(dirname "$SKILL_DEST")"   # .../workspace/skills
+mkdir -p "$SKILLS_ROOT"
 
-# Deploy: substitui cada item EXCETO scripts/ (preserva os scripts operacionais).
-for item in "$SRC"/*; do
-    [[ -e "$item" ]] || continue
-    base="$(basename "$item")"
-    [[ "$base" == "scripts" ]] && continue
-    rm -rf "$SKILL_DEST/$base"
-    cp -r "$item" "$SKILL_DEST/$base"
+# SP1 — Deploy de TODAS as skills do brain (nina + packs HABILITADOS). Para a
+# skill 'nina' preserva scripts/ (operacionais/install-managed); packs sincronizam
+# tudo (scripts de packs de ferramenta vêm do template — SP3).
+for srcdir in "$SKILLS_SRC"/*/; do
+    [[ -d "$srcdir" ]] || continue
+    name="$(basename "$srcdir")"
+    dest="$SKILLS_ROOT/$name"
+    mkdir -p "$dest"
+    for item in "$srcdir"*; do
+        [[ -e "$item" ]] || continue
+        b="$(basename "$item")"
+        if [[ "$name" == "nina" && "$b" == "scripts" ]]; then continue; fi
+        rm -rf "$dest/$b"
+        cp -r "$item" "$dest/$b"
+    done
 done
 
-log "brain atualizado: ${OLD:0:8} -> ${NEW:0:8} (persona/conhecimento sincronizados; scripts preservados)"
+# Prune de packs DESABILITADOS via manifesto skills/.nina-packs.json (brain-build):
+#  - 'managed' = TODOS os slugs do catálogo; 'enabled' = os ligados.
+#  - Só remove dir que está em MANAGED E NÃO em ENABLED -> nunca toca a 'nina'
+#    nem uma skill criada por fora do catálogo. Só prune se o manifesto existir.
+MANIFEST="$SKILLS_SRC/.nina-packs.json"
+if [[ -f "$MANIFEST" ]]; then
+    ENABLED=$(python3 -c "import json;print('\n'.join(json.load(open('$MANIFEST')).get('enabled',[])))" 2>/dev/null || echo "")
+    MANAGED=$(python3 -c "import json;print('\n'.join(json.load(open('$MANIFEST')).get('managed',[])))" 2>/dev/null || echo "")
+    for destdir in "$SKILLS_ROOT"/*/; do
+        [[ -d "$destdir" ]] || continue
+        name="$(basename "$destdir")"
+        [[ "$name" == "nina" ]] && continue
+        if grep -qxF "$name" <<< "$MANAGED" && ! grep -qxF "$name" <<< "$ENABLED"; then
+            rm -rf "$destdir"
+            log "pack desabilitado removido do workspace: $name"
+        fi
+    done
+fi
+
+log "brain atualizado: ${OLD:0:8} -> ${NEW:0:8} (nina + packs sincronizados; scripts da nina preservados)"
