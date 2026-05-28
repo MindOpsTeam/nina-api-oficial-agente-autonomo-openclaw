@@ -33,3 +33,12 @@ BRAIN_REPO=
 BRAIN_BRANCH=nina-brain
 # Clone local que rastreia nina-brain (fonte da skill; o sync faz deploy no workspace).
 BRAIN_DIR=
+# ── Ingress (P0): produção via Named Cloudflare Tunnel ────────────────────────
+# quick = quick tunnel efêmero (default zero-config/fallback); named = URL fixa.
+INGRESS_MODE=quick
+# Para o modo 'named' (produção), o painel injeta estes 2 (do Vault). Com ambos
+# preenchidos, a VPS roda o connector por token e usa a URL fixa do cliente.
+# Token do Named Tunnel (Cloudflare Zero Trust). Lido pelo cloudflared via TUNNEL_TOKEN.
+TUNNEL_TOKEN=
+# Hostname público que o cliente mapeou pro tunnel (ex.: nina.cliente.com).
+CF_TUNNEL_HOSTNAME=
