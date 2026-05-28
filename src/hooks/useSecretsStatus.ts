@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { notifyCerebroChanged } from '@/services/cerebroService';
 
 export type SecretName = 'PANEL_TOKEN' | 'NINA_TOOLS_SECRET' | 'GITHUB_BRAIN_TOKEN' | 'ANTHROPIC_API_KEY';
 
@@ -84,6 +85,7 @@ export function useSecretsStatus(): UseSecretsStatusResult {
   const recordSaved = useCallback((name: SecretName) => {
     if (typeof window !== 'undefined') window.localStorage.setItem(flagKey(name), 'true');
     setLocalFlags((f) => ({ ...f, [name]: true }));
+    notifyCerebroChanged(); // avisa a jornada (useCerebroConfig) para destravar passos
   }, []);
 
   const status = SECRET_NAMES.reduce((acc, name) => {

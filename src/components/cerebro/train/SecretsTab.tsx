@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2, KeyRound, Sparkles } from 'lucide-react';
+import { Loader2, KeyRound, Sparkles, AlertTriangle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useSecretsStatus, SECRET_NAMES, type SecretName } from '@/hooks/useSecretsStatus';
@@ -21,6 +21,8 @@ const TEXT = {
   anthropicError: 'Erro ao salvar a chave Anthropic. Tente novamente.',
   configured: 'Configurado',
   notConfigured: 'Pendente',
+  anthropicRequired: 'A chave Anthropic é obrigatória para a Nina pensar. Sem ela, o agente não responde — configure antes de instalar na VPS.',
+  heartbeatNote: 'Trocou a chave? A nova se propaga sozinha para a VPS em ~5 min via heartbeat — não precisa reinstalar.',
 } as const;
 
 const SecretsTab: React.FC = () => {
@@ -76,7 +78,11 @@ const SecretsTab: React.FC = () => {
         )}
       </div>
 
-      <div className="border-t border-slate-800 pt-5">
+      <div className="border-t border-slate-800 pt-5 space-y-3">
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 text-xs text-amber-300">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-px" />
+          {TEXT.anthropicRequired}
+        </div>
         <WriteOnlySecretField
           label={TEXT.anthropicLabel}
           placeholder={TEXT.anthropicPlaceholder}
@@ -90,6 +96,10 @@ const SecretsTab: React.FC = () => {
             </span>
           }
         />
+        <p className="flex items-start gap-1.5 text-xs text-slate-500">
+          <Zap className="w-3.5 h-3.5 flex-shrink-0 mt-px text-cyan-400" />
+          {TEXT.heartbeatNote}
+        </p>
       </div>
     </div>
   );
