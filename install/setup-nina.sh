@@ -34,6 +34,10 @@ ENV_FILE="${STATE_DIR}/.env"
 LOG_DIR="${STATE_DIR}/logs"
 BRAIN_DIR="${STATE_DIR}/brain"   # clone git que rastreia nina-brain (read-only via token)
 GW_PORT=18789
+# Versão PINADA do OpenClaw (testada e validada com a skill nina). NÃO usar @latest:
+# a 2026.5.27 quebrou o hook agent run (completa sem rodar a skill / sem nina_reply).
+# Bumpar de propósito aqui só após validar uma versão nova.
+OPENCLAW_VERSION="2026.5.26"
 
 mkdir -p "$STATE_DIR" "$LOG_DIR" "${WS_ROOT}/skills"
 
@@ -96,8 +100,8 @@ ok "Dependências base OK."
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 2 — OpenClaw + otimizações VPS
 # ═══════════════════════════════════════════════════════════════════════════════
-info "Instalando/atualizando OpenClaw..."
-npm install -g openclaw@latest 2>&1 | tail -3 || fail "Falha ao instalar OpenClaw."
+info "Instalando/atualizando OpenClaw (pinado em ${OPENCLAW_VERSION})..."
+npm install -g openclaw@"${OPENCLAW_VERSION}" 2>&1 | tail -3 || fail "Falha ao instalar OpenClaw."
 ok "OpenClaw: $(openclaw --version 2>/dev/null | head -1)"
 
 if ! grep -q 'OPENCLAW_NO_RESPAWN' "${HOME}/.bashrc" 2>/dev/null; then
@@ -316,6 +320,11 @@ EOF
 
 systemctl daemon-reload 2>/dev/null || true
 systemctl enable --now openclaw-gateway 2>/dev/null || warn "enable openclaw-gateway falhou."
+# Re-install: 'enable --now' NÃO reinicia um unit já rodando -> o processo VELHO
+# (binário/config anteriores) continuaria ativo (mismatch de versão). O restart
+# aplica o binário pinado + config novos. Idempotente (1ª instalação: reinicia o
+# que acabou de subir, inofensivo).
+systemctl restart openclaw-gateway 2>/dev/null || true
 
 info "Aguardando gateway na porta ${GW_PORT} (até 60s)..."
 for _i in $(seq 1 30); do
