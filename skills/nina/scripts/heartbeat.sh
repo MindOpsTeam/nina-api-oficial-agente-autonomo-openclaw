@@ -30,14 +30,18 @@ _detect_tunnel_url() {
     echo "${d:-}"
 }
 
-NEW_URL=$(_detect_tunnel_url || true)
-if [[ -n "$NEW_URL" && "$NEW_URL" != "${INGRESS_URL:-}" ]]; then
-    echo "[$(date '+%F %T')] tunnel url: ${INGRESS_URL:-vazio} → $NEW_URL" >> "$LOG_FILE"
-    INGRESS_URL="$NEW_URL"
-    if [[ -f "$_ENV_FILE" ]]; then
-        grep -q "^INGRESS_URL=" "$_ENV_FILE" \
-            && sed -i "s|^INGRESS_URL=.*|INGRESS_URL=${NEW_URL}|" "$_ENV_FILE" \
-            || echo "INGRESS_URL=${NEW_URL}" >> "$_ENV_FILE"
+# Re-detecção só no modo quick (URL efêmera). No named tunnel a URL é FIXA
+# (vem do .env), então não re-detectamos nem sobrescrevemos.
+if [[ "${INGRESS_MODE:-quick}" == "quick" ]]; then
+    NEW_URL=$(_detect_tunnel_url || true)
+    if [[ -n "$NEW_URL" && "$NEW_URL" != "${INGRESS_URL:-}" ]]; then
+        echo "[$(date '+%F %T')] tunnel url: ${INGRESS_URL:-vazio} → $NEW_URL" >> "$LOG_FILE"
+        INGRESS_URL="$NEW_URL"
+        if [[ -f "$_ENV_FILE" ]]; then
+            grep -q "^INGRESS_URL=" "$_ENV_FILE" \
+                && sed -i "s|^INGRESS_URL=.*|INGRESS_URL=${NEW_URL}|" "$_ENV_FILE" \
+                || echo "INGRESS_URL=${NEW_URL}" >> "$_ENV_FILE"
+        fi
     fi
 fi
 

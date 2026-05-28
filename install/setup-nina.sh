@@ -48,6 +48,19 @@ mkdir -p "$STATE_DIR" "$LOG_DIR" "${WS_ROOT}/skills"
 : "${PANEL_TOKEN:?PANEL_TOKEN ausente}"
 : "${INSTALLER_TOKEN:?INSTALLER_TOKEN ausente}"
 
+# ── Ingress mode (P0) ─────────────────────────────────────────────────────────
+# 'named'  = Cloudflare Named Tunnel com token do cliente -> URL FIXA (produção).
+# 'quick'  = Cloudflare quick tunnel (*.trycloudflare.com) -> URL efêmera (default
+#            zero-config / fallback). Escolhido pela credencial injetada no install.
+INGRESS_MODE="quick"
+NAMED_INGRESS_URL=""
+if [[ -n "${CF_TUNNEL_TOKEN:-}" && -n "${CF_TUNNEL_HOSTNAME:-}" ]]; then
+    INGRESS_MODE="named"
+    _h="${CF_TUNNEL_HOSTNAME#http://}"; _h="${_h#https://}"; _h="${_h%/}"
+    NAMED_INGRESS_URL="https://${_h}"
+fi
+ok "Ingress mode: ${INGRESS_MODE}${NAMED_INGRESS_URL:+ (${NAMED_INGRESS_URL})}"
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 1 — Preflight: Node 22.12+ e dependências
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -219,6 +232,11 @@ NINA_TOOLS_SECRET=${NINA_TOOLS_SECRET:-}
 HOOKS_TOKEN=${HOOKS_TOKEN}
 INGRESS_URL=${INGRESS_URL:-}
 INSTANCE_ID=${INSTANCE_ID:-}
+# Ingress (P0): modo + named tunnel. TUNNEL_TOKEN é lido pelo cloudflared via
+# EnvironmentFile (named mode). No modo quick fica vazio (usa --url efêmero).
+INGRESS_MODE=${INGRESS_MODE}
+CF_TUNNEL_HOSTNAME=${CF_TUNNEL_HOSTNAME:-}
+TUNNEL_TOKEN=${CF_TUNNEL_TOKEN:-}
 # Brain Build (T3) — pull do branch nina-brain (read-only)
 GITHUB_BRAIN_TOKEN=${GITHUB_BRAIN_TOKEN:-}
 BRAIN_REPO=${SKILL_REPO}
@@ -265,6 +283,18 @@ TimeoutStartSec=90
 WantedBy=multi-user.target
 EOF
 
+# ExecStart por modo: named roda o connector por token (TUNNEL_TOKEN do
+# EnvironmentFile -> URL FIXA); quick usa o tunnel efêmero --url.
+if [[ "$INGRESS_MODE" == "named" ]]; then
+    _CF_EXECSTART="${_CF_BIN} tunnel run --no-autoupdate"
+    _CF_POST=""   # URL fixa: não precisa re-anunciar
+else
+    _CF_EXECSTART="${_CF_BIN} tunnel --url http://localhost:${GW_PORT} --no-autoupdate"
+    # Ponte GAP7: ao (re)subir o quick tunnel, anuncia a nova URL na hora via
+    # heartbeat (encurta a janela de URL stale de ~5min p/ ~segundos). Sempre exit 0.
+    _CF_POST="ExecStartPost=/usr/bin/env bash -c 'for _i in \$(seq 1 20); do sleep 2; journalctl -u cloudflared-nina -n 40 --no-pager 2>/dev/null | grep -q trycloudflare.com && break; done; /usr/bin/env bash ${SKILL_DEST}/scripts/heartbeat.sh >> ${LOG_DIR}/heartbeat.log 2>&1 || true'"
+fi
+
 cat > /etc/systemd/system/cloudflared-nina.service <<EOF
 [Unit]
 Description=Cloudflare Tunnel (Nina SDR)
@@ -273,7 +303,10 @@ After=network.target openclaw-gateway.service
 [Service]
 Type=simple
 User=${_USER_NAME}
-ExecStart=${_CF_BIN} tunnel --url http://localhost:${GW_PORT} --no-autoupdate
+Environment=HOME=${HOME}
+EnvironmentFile=${ENV_FILE}
+ExecStart=${_CF_EXECSTART}
+${_CF_POST}
 Restart=always
 RestartSec=10
 
@@ -294,16 +327,22 @@ done
 # PASSO 9 — Cloudflare Tunnel: subir e extrair INGRESS_URL
 # ═══════════════════════════════════════════════════════════════════════════════
 systemctl enable --now cloudflared-nina 2>/dev/null || warn "enable cloudflared-nina falhou."
-info "Aguardando URL do Cloudflare Tunnel (até 60s)..."
-INGRESS_URL=""
-for _i in $(seq 1 30); do
-    sleep 2
-    INGRESS_URL=$(journalctl -u cloudflared-nina -n 80 --no-pager 2>/dev/null \
-        | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || echo "")
-    [[ -n "$INGRESS_URL" ]] && break
-done
-[[ -z "$INGRESS_URL" ]] && fail "Não foi possível capturar a URL do Tunnel. Cheque: journalctl -u cloudflared-nina"
-ok "Tunnel ativo: ${INGRESS_URL}"
+if [[ "$INGRESS_MODE" == "named" ]]; then
+    # URL FIXA do named tunnel (hostname que o cliente mapeou no Cloudflare).
+    INGRESS_URL="$NAMED_INGRESS_URL"
+    ok "Named tunnel — ingress FIXO: ${INGRESS_URL}"
+else
+    info "Aguardando URL do Cloudflare quick tunnel (até 60s)..."
+    INGRESS_URL=""
+    for _i in $(seq 1 30); do
+        sleep 2
+        INGRESS_URL=$(journalctl -u cloudflared-nina -n 80 --no-pager 2>/dev/null \
+            | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || echo "")
+        [[ -n "$INGRESS_URL" ]] && break
+    done
+    [[ -z "$INGRESS_URL" ]] && fail "Não foi possível capturar a URL do quick tunnel. Cheque: journalctl -u cloudflared-nina"
+    ok "Quick tunnel ativo: ${INGRESS_URL}"
+fi
 sed -i "s|^INGRESS_URL=.*|INGRESS_URL=${INGRESS_URL}|" "$ENV_FILE"
 
 # ═══════════════════════════════════════════════════════════════════════════════

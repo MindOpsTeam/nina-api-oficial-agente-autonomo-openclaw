@@ -64,6 +64,10 @@ Deno.serve(async (req: Request) => {
   const anthropicKey = (await getSecret("ANTHROPIC_API_KEY")) ?? "";
   // T3 — token read-only pra VPS puxar o branch nina-brain (repo privado).
   const brainToken = (await getSecret("GITHUB_BRAIN_TOKEN")) ?? "";
+  // P0 — Named Cloudflare Tunnel (ingress de produção, URL fixa). Opcional: se
+  // ambos estiverem no Vault, a VPS usa named tunnel; senão cai no quick tunnel.
+  const cfTunnelToken = (await getSecret("CF_TUNNEL_TOKEN")) ?? "";
+  const cfTunnelHostname = (await getSecret("CF_TUNNEL_HOSTNAME")) ?? "";
 
   // SKILL_REPO: repo de cérebro DO CLIENTE (a VPS instala/sincroniza a skill do
   // branch nina-brain DESSE repo, não do original hardcoded). Fallback single-tenant
@@ -97,6 +101,13 @@ Deno.serve(async (req: Request) => {
   // default (skill genérica) — comportamento atual, sem quebrar.
   if (brainRepoUrl) {
     envLines.push(`export SKILL_REPO=${shEscape(brainRepoUrl)}`);
+  }
+
+  // Named tunnel (P0): só emite se token + hostname existirem; senão a VPS usa
+  // o quick tunnel (default zero-config / fallback) — sem quebrar.
+  if (cfTunnelToken && cfTunnelHostname) {
+    envLines.push(`export CF_TUNNEL_TOKEN=${shEscape(cfTunnelToken)}`);
+    envLines.push(`export CF_TUNNEL_HOSTNAME=${shEscape(cfTunnelHostname)}`);
   }
 
   const script = `#!/usr/bin/env bash
