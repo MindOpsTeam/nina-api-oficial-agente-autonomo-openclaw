@@ -12,11 +12,12 @@
  * (messages.metadata.reaped_at ausente). Idempotente: marca reaped_at só após
  * enfileirar com sucesso.
  *
- * Auth: service-role (Bearer SUPABASE_SERVICE_ROLE_KEY).
+ * Auth: X-Panel-Token (vs PANEL_TOKEN do Vault) — mesmo padrão das outras fns de
+ * painel. O cron (public.trigger_reaper) lê o PANEL_TOKEN do Vault em runtime e
+ * envia no header. As operações INTERNAS de DB seguem com SUPABASE_SERVICE_ROLE_KEY.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/panel.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { corsHeaders, errorResponse, validatePanelToken } from "../_shared/panel.ts";
 import { generateLovableReply } from "../_shared/lovable_reply.ts";
 
 const ORPHAN_MIN_AGE_MS = 5 * 60 * 1000;   // tem que ter > 5min (margem: latência openclaw observada ~30-100s; evita preemptar resposta boa com fallback)
@@ -64,8 +65,7 @@ async function hasNinaReplyAfter(supabase: any, conversationId: string, afterIso
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const authFail = requireServiceRole(req, corsHeaders);
-  if (authFail) return authFail;
+  if (!(await validatePanelToken(req))) return errorResponse("Token inválido", 401);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
