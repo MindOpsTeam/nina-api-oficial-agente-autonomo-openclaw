@@ -680,6 +680,20 @@ async function processQueueItem(
   if (tools.length > 0) {
     requestBody.tools = tools;
     requestBody.tool_choice = "auto";
+
+    // GAP2: as tools só são chamadas se o system prompt mandar usá-las. O prompt
+    // default já traz <tool_usage_protocol>, mas uma persona custom
+    // (system_prompt_override) pode não ter -> anexa uma instrução curta SÓ
+    // quando o prompt ainda não menciona as tools (evita duplicar). Este trecho
+    // só roda no caminho síncrono Lovable/fallback (o ramo openclaw já retornou).
+    const systemMsg = requestBody.messages[0];
+    if (typeof systemMsg?.content === 'string' && !systemMsg.content.includes('create_appointment')) {
+      systemMsg.content += '\n\n<tool_usage_protocol>\n' +
+        'Quando o lead combinar/confirmar um horário, use a tool create_appointment; ' +
+        'para mudar, reschedule_appointment; para cancelar, cancel_appointment. ' +
+        'Só confirme o agendamento/reagendamento/cancelamento após a tool retornar sucesso.\n' +
+        '</tool_usage_protocol>';
+    }
   }
 
   // Caminho SÍNCRONO: Lovable AI. Só chega aqui no modo lovable OU no fallback
