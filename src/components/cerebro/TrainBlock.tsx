@@ -9,12 +9,13 @@ import { supabase } from '@/integrations/supabase/client';
 import IdentityForm from './train/IdentityForm';
 import ProductsManager from './train/ProductsManager';
 import KnowledgeManager from './train/KnowledgeManager';
+import SkillsStore from './train/SkillsStore';
 import { getLastSync, setLastSync, type LastSync } from '@/services/cerebroService';
 
 const TEXT = {
   title: 'Treinar a Nina',
   subtitle: 'Configure a identidade, os produtos e o conhecimento — depois sincronize o cérebro com o repositório.',
-  tabs: { identity: 'Identidade', products: 'Produtos', knowledge: 'Conhecimento' },
+  tabs: { identity: 'Identidade', products: 'Produtos', knowledge: 'Conhecimento', skills: 'Habilidades' },
   sync: 'Sincronizar cérebro',
   syncing: 'Sincronizando…',
   synced: 'Cérebro sincronizado',
@@ -89,10 +90,12 @@ const TrainBlock: React.FC = () => {
           <TabsTrigger value="identity">{TEXT.tabs.identity}</TabsTrigger>
           <TabsTrigger value="products">{TEXT.tabs.products}</TabsTrigger>
           <TabsTrigger value="knowledge">{TEXT.tabs.knowledge}</TabsTrigger>
+          <TabsTrigger value="skills">{TEXT.tabs.skills}</TabsTrigger>
         </TabsList>
         <TabsContent value="identity" className="mt-5"><IdentityForm /></TabsContent>
         <TabsContent value="products" className="mt-5"><ProductsManager /></TabsContent>
         <TabsContent value="knowledge" className="mt-5"><KnowledgeManager /></TabsContent>
+        <TabsContent value="skills" className="mt-5"><SkillsStore /></TabsContent>
       </Tabs>
 
       <div className="mt-6 border-t border-slate-800 pt-5 flex flex-wrap items-center justify-between gap-4">
