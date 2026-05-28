@@ -474,6 +474,44 @@ export type Database = {
           },
         ]
       }
+      installed_packs: {
+        Row: {
+          config: Json
+          created_at: string
+          enabled: boolean
+          id: string
+          owner_user_id: string
+          pack_slug: string
+          updated_at: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          owner_user_id?: string
+          pack_slug: string
+          updated_at?: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          owner_user_id?: string
+          pack_slug?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "installed_packs_pack_slug_fkey"
+            columns: ["pack_slug"]
+            isOneToOne: false
+            referencedRelation: "skill_packs"
+            referencedColumns: ["slug"]
+          },
+        ]
+      }
       installer_tokens: {
         Row: {
           created_at: string
@@ -1065,6 +1103,48 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      skill_packs: {
+        Row: {
+          active_by_default: boolean
+          config_schema: Json
+          created_at: string
+          description: string | null
+          level: string
+          name: string
+          position: number
+          requires_edge_fns: string[]
+          requires_secrets: string[]
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          active_by_default?: boolean
+          config_schema?: Json
+          created_at?: string
+          description?: string | null
+          level: string
+          name: string
+          position?: number
+          requires_edge_fns?: string[]
+          requires_secrets?: string[]
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          active_by_default?: boolean
+          config_schema?: Json
+          created_at?: string
+          description?: string | null
+          level?: string
+          name?: string
+          position?: number
+          requires_edge_fns?: string[]
+          requires_secrets?: string[]
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       tag_definitions: {
         Row: {
