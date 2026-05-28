@@ -21,10 +21,17 @@ const TEXT = {
   ],
   oneTimeNote:
     'O comando carrega apenas um token de instalação de uso único. Nenhum outro segredo é exposto.',
+  reinstallNote:
+    'Rode o comando uma única vez na VPS. Só reinstale se mudar a URL ou as credenciais do servidor — trocar chaves (Anthropic/GitHub) se propaga sozinho via heartbeat, sem reinstalar.',
   error: 'Falha ao gerar o comando de instalação',
 } as const;
 
-const InstallBlock: React.FC = () => {
+interface InstallBlockProps {
+  /** Quando true, impede gerar o comando (pré-requisitos da jornada não cumpridos). */
+  locked?: boolean;
+}
+
+const InstallBlock: React.FC<InstallBlockProps> = ({ locked = false }) => {
   const [generating, setGenerating] = useState(false);
   const [installCommand, setInstallCommand] = useState<string | null>(null);
   const [expiresIn, setExpiresIn] = useState<number>(30);
@@ -76,7 +83,7 @@ const InstallBlock: React.FC = () => {
         ))}
       </ol>
 
-      <Button onClick={handleGenerate} disabled={generating}>
+      <Button onClick={handleGenerate} disabled={generating || locked}>
         {generating ? (
           <>
             <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -117,6 +124,11 @@ const InstallBlock: React.FC = () => {
           </div>
         </div>
       )}
+
+      <div className="mt-5 flex items-start gap-2 rounded-lg border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">
+        <Clock className="w-4 h-4 flex-shrink-0 mt-px text-cyan-400" />
+        {TEXT.reinstallNote}
+      </div>
     </div>
   );
 };

@@ -9,15 +9,12 @@ import { supabase } from '@/integrations/supabase/client';
 import IdentityForm from './train/IdentityForm';
 import ProductsManager from './train/ProductsManager';
 import KnowledgeManager from './train/KnowledgeManager';
-import RepoConfig from './train/RepoConfig';
-import SecretsTab from './train/SecretsTab';
-
-const SYNC_KEY = 'nina_brain_last_sync';
+import { getLastSync, setLastSync, type LastSync } from '@/services/cerebroService';
 
 const TEXT = {
   title: 'Treinar a Nina',
   subtitle: 'Configure a identidade, os produtos e o conhecimento — depois sincronize o cérebro com o repositório.',
-  tabs: { identity: 'Identidade', products: 'Produtos', knowledge: 'Conhecimento', repo: 'Repositório', secrets: 'Chaves' },
+  tabs: { identity: 'Identidade', products: 'Produtos', knowledge: 'Conhecimento' },
   sync: 'Sincronizar cérebro',
   syncing: 'Sincronizando…',
   synced: 'Cérebro sincronizado',
@@ -27,22 +24,6 @@ const TEXT = {
   errGithub: 'Falha ao falar com o GitHub. Verifique o repositório e o token.',
   errGeneric: 'Erro ao sincronizar o cérebro. Tente novamente.',
 } as const;
-
-interface SyncResult {
-  commitSha: string;
-  branch: string;
-  filesCount: number;
-  at: string;
-}
-
-function loadLastSync(): SyncResult | null {
-  try {
-    const raw = window.localStorage.getItem(SYNC_KEY);
-    return raw ? (JSON.parse(raw) as SyncResult) : null;
-  } catch {
-    return null;
-  }
-}
 
 async function mapBuildError(error: unknown): Promise<string> {
   const ctx = (error as { context?: Response })?.context;
@@ -62,7 +43,7 @@ async function mapBuildError(error: unknown): Promise<string> {
 
 const TrainBlock: React.FC = () => {
   const [syncing, setSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<SyncResult | null>(() => loadLastSync());
+  const [lastSync, setLastSyncState] = useState<LastSync | null>(() => getLastSync());
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const handleSync = async () => {
@@ -78,14 +59,14 @@ const TrainBlock: React.FC = () => {
         setSyncError(data.message ?? TEXT.errGeneric);
         return;
       }
-      const result: SyncResult = {
+      const result: LastSync = {
         commitSha: data?.commit_sha ?? '',
         branch: data?.branch ?? 'nina-brain',
         filesCount: Array.isArray(data?.files_written) ? data.files_written.length : 0,
         at: new Date().toISOString(),
       };
-      window.localStorage.setItem(SYNC_KEY, JSON.stringify(result));
-      setLastSync(result);
+      setLastSync(result); // persiste + notifia a jornada (destrava o passo Instalar)
+      setLastSyncState(result);
       toast.success(TEXT.synced, { description: `${result.filesCount} arquivos no branch ${result.branch}` });
     } catch (err) {
       console.error('[TrainBlock] Erro ao sincronizar:', err);
@@ -108,14 +89,10 @@ const TrainBlock: React.FC = () => {
           <TabsTrigger value="identity">{TEXT.tabs.identity}</TabsTrigger>
           <TabsTrigger value="products">{TEXT.tabs.products}</TabsTrigger>
           <TabsTrigger value="knowledge">{TEXT.tabs.knowledge}</TabsTrigger>
-          <TabsTrigger value="repo">{TEXT.tabs.repo}</TabsTrigger>
-          <TabsTrigger value="secrets">{TEXT.tabs.secrets}</TabsTrigger>
         </TabsList>
         <TabsContent value="identity" className="mt-5"><IdentityForm /></TabsContent>
         <TabsContent value="products" className="mt-5"><ProductsManager /></TabsContent>
         <TabsContent value="knowledge" className="mt-5"><KnowledgeManager /></TabsContent>
-        <TabsContent value="repo" className="mt-5"><RepoConfig /></TabsContent>
-        <TabsContent value="secrets" className="mt-5"><SecretsTab /></TabsContent>
       </Tabs>
 
       <div className="mt-6 border-t border-slate-800 pt-5 flex flex-wrap items-center justify-between gap-4">
