@@ -52,7 +52,14 @@ while :; do
         -H "Content-Type: application/json" -H "x-nina-secret: ${NINA_TOOLS_SECRET}" \
         -d "$BODY" 2>>"$LOG_DIR/agendar.log" || printf '\n000')
     code=$(printf '%s' "$RESP" | tail -n1); payload=$(printf '%s' "$RESP" | sed '$d')
-    if [[ "$code" =~ ^2 ]]; then echo "$payload"; exit 0; fi
+    if [[ "$code" =~ ^2 ]]; then
+        # 2xx mas ok!=true (erro de domínio: title NOT NULL, time_conflict, etc.)
+        # era invisível no log. Loga a resposta inteira; mantém o echo pro agente.
+        if ! printf '%s' "$payload" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'; then
+            printf '[%s] agendar %s -> ok=false body=%s\n' "$(date +%FT%T)" "$ACTION" "$payload" >> "$LOG_DIR/agendar.log"
+        fi
+        echo "$payload"; exit 0
+    fi
     if [[ "$code" == "000" || "$code" =~ ^5 ]] && [[ $attempt -lt $max ]]; then
         sleep "$delay"; delay=$((delay*2)); continue
     fi

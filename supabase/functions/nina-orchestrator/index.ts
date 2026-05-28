@@ -556,7 +556,7 @@ async function processQueueItem(
         `ANTES de responder, executar via exec:\n` +
         `bash skills/nina/scripts/agendar.sh --action create|reschedule|cancel ` +
         `--contact "${conversation.contact_id}" --conversation "${conversation.id}" ` +
-        `--user "${settings?.user_id ?? ''}" --args '{"date":"AAAA-MM-DD","time":"HH:MM"}'\n` +
+        `--user "${settings?.user_id ?? ''}" --args '{"date":"AAAA-MM-DD","time":"HH:MM","title":"<motivo curto, ex: Demonstração RD Station>"}'\n` +
         `Use exatamente os IDs do metadata desta chamada (conversation_id, contact_id, user_id). ` +
         `NUNCA diga que agendou sem ter recebido ok:true do script; em time_conflict/date_in_past, ` +
         `ofereça outro horário ao lead.`;
