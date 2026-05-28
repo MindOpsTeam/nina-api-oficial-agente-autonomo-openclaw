@@ -5,6 +5,20 @@
 -- nada de service-role key embutida no cron.job. Ambos os segredos são populados
 -- pela edge fn provision-secrets no onboarding; até lá, o trigger é no-op seguro.
 
+-- Lock singleton p/ serializar execuções do reaper (evita 2 runs concorrentes ->
+-- fallback duplicado). UPDATE condicional atômico no reap-orphan-runs; este é só
+-- o storage. RLS: só service_role (a edge fn usa service-role; cliente não acessa).
+CREATE TABLE IF NOT EXISTS public.reaper_lock (
+  id boolean PRIMARY KEY DEFAULT true,
+  locked_at timestamptz,
+  CONSTRAINT reaper_lock_singleton CHECK (id = true)
+);
+INSERT INTO public.reaper_lock (id, locked_at) VALUES (true, NULL) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.reaper_lock ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "service_role_all_reaper_lock" ON public.reaper_lock;
+CREATE POLICY "service_role_all_reaper_lock" ON public.reaper_lock
+  FOR ALL USING (auth.role() = 'service_role');
+
 -- Função que o cron chama: lê os segredos do Vault e dispara o reaper via HTTP.
 -- SECURITY DEFINER -> roda como o owner (acesso a vault via get_secret + a net).
 -- Auth da chamada: header X-Panel-Token (a fn reap-orphan-runs valida vs Vault).
