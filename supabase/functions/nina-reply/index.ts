@@ -70,9 +70,10 @@ Deno.serve(async (req: Request) => {
   const supabase = adminClient();
 
   // send_queue exige contact_id (NOT NULL) — resolve a partir da conversa.
+  // Traz também a client_memory do contato (p/ o analyze-conversation mesclar — GAP6).
   const { data: conversation, error: convErr } = await supabase
     .from("conversations")
-    .select("id, contact_id")
+    .select("id, contact_id, contact:contacts(client_memory)")
     .eq("id", conversationId)
     .maybeSingle();
 
@@ -122,6 +123,46 @@ Deno.serve(async (req: Request) => {
 
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
     EdgeRuntime.waitUntil(triggerSender);
+  }
+
+  // GAP6: dispara analyze-conversation pra atualizar a client_memory do lead também
+  // no caminho openclaw. O orchestrator só dispara no caminho lovable; o ramo
+  // openclaw faz o dispatch async e retorna antes -> a memória nunca atualizava.
+  // Espelha o trigger do orchestrator (mesmo alvo + header service-role + body).
+  // 1x por reply, só no caminho real (o de teste já retornou cedo). NÃO altera o
+  // analyze-conversation nem o caminho lovable.
+  const currentMemory = (conversation as any).contact?.client_memory ?? {};
+  const triggerAnalyze = (async () => {
+    // user_message = última mensagem do lead nesta conversa (pode faltar -> '').
+    let userMessage = "";
+    try {
+      const { data: lastUserMsg } = await supabase
+        .from("messages")
+        .select("content")
+        .eq("conversation_id", conversation.id)
+        .eq("from_type", "user")
+        .order("sent_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      userMessage = lastUserMsg?.content ?? "";
+    } catch (_e) {
+      // segue com user_message vazio
+    }
+    await fetch(`${supabaseUrl}/functions/v1/analyze-conversation`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${serviceKey}` },
+      body: JSON.stringify({
+        contact_id: conversation.contact_id,
+        conversation_id: conversation.id,
+        user_message: userMessage,
+        ai_response: content,
+        current_memory: currentMemory,
+      }),
+    });
+  })().catch((err) => console.error("[nina-reply] Error triggering analyze-conversation:", err));
+
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime?.waitUntil) {
+    EdgeRuntime.waitUntil(triggerAnalyze);
   }
 
   return jsonResponse({ queued: true, send_queue_id: queued.id });
