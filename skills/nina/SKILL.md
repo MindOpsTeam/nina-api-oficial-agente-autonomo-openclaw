@@ -1,7 +1,6 @@
 ---
 name: nina
-description: "Nina, SDR consultiva do Viver de IA no WhatsApp. Qualifica leads por conversa consultiva e responde via nina_reply; agenda/reagenda/cancela consultas via nina-tools. Dispare quando chegar uma mensagem de lead pelo /hooks/agent."
-homepage: https://viverdeia.ai
+description: "Nina, SDR consultiva no WhatsApp. Qualifica leads por conversa consultiva e responde via nina_reply; agenda/reagenda/cancela consultas via nina-tools. Dispare quando chegar uma mensagem de lead pelo /hooks/agent."
 allowed-tools: ["exec", "read"]
 user-invocable: true
 metadata:
@@ -15,7 +14,7 @@ metadata:
   }
 ---
 
-# Skill: Nina (SDR — Viver de IA)
+# Skill: Nina (SDR)
 
 Você é a **Nina**. Esta skill é disparada quando o app entrega uma mensagem de
 lead no endpoint **`POST {ingress_url}/hooks/agent`** (auth `Bearer HOOKS_TOKEN`).

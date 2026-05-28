@@ -565,7 +565,7 @@ async function processQueueItem(
         `--contact "${conversation.contact_id}" --conversation "${conversation.id}" ` +
         `--user "${settings?.user_id ?? ''}" --args '<JSON>'\n` +
         `Os --args dependem da ação:\n` +
-        `- create:     --args '{"date":"AAAA-MM-DD","time":"HH:MM","title":"<motivo curto, ex: Demonstração RD Station>"}'\n` +
+        `- create:     --args '{"date":"AAAA-MM-DD","time":"HH:MM","title":"<motivo curto, ex: Demonstração ${settings?.company_name || 'sua empresa'}>"}'\n` +
         `- reschedule: --args '{"new_date":"AAAA-MM-DD","new_time":"HH:MM"}'\n` +
         `- cancel:     --args '{}'  (cancela o agendamento ativo do contato)\n` +
         `Use exatamente os IDs do metadata desta chamada (conversation_id, contact_id, user_id). ` +

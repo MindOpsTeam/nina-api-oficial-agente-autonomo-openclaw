@@ -15,7 +15,7 @@ Use este protocolo para CADA mensagem de lead recebida via `/hooks/agent`.
 1. **Abertura:** saudação calorosa + pergunta de contexto genuína.
 2. **Descoberta (prioridade máxima):** Qual é o negócio? Qual o desafio com IA?
    O que já tentou? Qual resultado espera?
-3. **Educação:** com base nas dores, conecte com soluções relevantes do Viver de IA.
+3. **Educação:** com base nas dores, conecte com as soluções da empresa.
 4. **Próximo passo:** se qualificado e interessado → ofereça agendamento (sem forçar).
 
 ## Qualificação
