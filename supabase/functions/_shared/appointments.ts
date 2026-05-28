@@ -128,12 +128,23 @@ export async function rescheduleAppointmentFromAI(
   contactId: string,
   userId: string | null,
   args: {
-    new_date: string;
-    new_time: string;
+    new_date?: string;
+    new_time?: string;
+    date?: string;
+    time?: string;
     reason?: string;
   }
 ): Promise<any> {
   console.log('[Nina] Rescheduling appointment for contact:', contactId, 'user:', userId, args);
+
+  // O agente às vezes manda {date,time} (estilo create) no reschedule. Normaliza:
+  // aceita ambos os formatos -> funciona com o que ele mandar (robusto server-side).
+  const newDate = (args.new_date || args.date || '').trim();
+  const newTime = (args.new_time || args.time || '').trim();
+  if (!newDate || !newTime) {
+    console.log('[Nina] Reschedule sem nova data/hora');
+    return { error: 'missing_new_datetime' };
+  }
 
   // Find the most recent scheduled appointment for this contact
   const query = supabase
@@ -159,7 +170,7 @@ export async function rescheduleAppointmentFromAI(
   const appointment = existingAppointments[0];
 
   // Validate new date is not in the past
-  const newAppointmentDate = new Date(`${args.new_date}T${args.new_time}:00`);
+  const newAppointmentDate = new Date(`${newDate}T${newTime}:00`);
   const now = new Date();
 
   if (newAppointmentDate < now) {
@@ -171,7 +182,7 @@ export async function rescheduleAppointmentFromAI(
   const conflictQuery = supabase
     .from('appointments')
     .select('id, time, duration, title')
-    .eq('date', args.new_date)
+    .eq('date', newDate)
     .eq('status', 'scheduled')
     .neq('id', appointment.id);
 
@@ -181,7 +192,7 @@ export async function rescheduleAppointmentFromAI(
 
   const { data: conflictingAppointments } = await conflictQuery;
 
-  const requestedStart = parseTimeToMinutes(args.new_time);
+  const requestedStart = parseTimeToMinutes(newTime);
   const requestedEnd = requestedStart + (appointment.duration || 60);
 
   for (const existing of conflictingAppointments || []) {
@@ -202,8 +213,8 @@ export async function rescheduleAppointmentFromAI(
   const { data, error } = await supabase
     .from('appointments')
     .update({
-      date: args.new_date,
-      time: args.new_time,
+      date: newDate,
+      time: newTime,
       metadata: {
         ...appointment.metadata,
         rescheduled_at: new Date().toISOString(),
