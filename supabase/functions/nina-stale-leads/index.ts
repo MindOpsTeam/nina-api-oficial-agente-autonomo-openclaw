@@ -32,6 +32,8 @@ const PER_OWNER_BATCH = 25;          // máx. conversas por owner por execução
 const UNIT_MS: Record<string, number> = { minutos: 60_000, horas: 3_600_000, dias: 86_400_000 };
 const FLOOR_MS = 5 * 60_000;
 const META_FREE_WINDOW_MS = 24 * 60 * 60_000;
+// Stale-timeout do lock (R1-bis): só recupera crash; run normal libera no finally.
+const LOCK_STALE_MS = 30 * 60_000;
 function windowMsFromConfig(cfg: any): number {
   const unitMs = UNIT_MS[String(cfg?.janela_unidade ?? "horas")] ?? UNIT_MS.horas;
   const valor = Number(cfg?.janela_valor);
@@ -63,6 +65,25 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
+
+  // R1-bis: serializa execuções (cron */13 + geração Lovable pode passar de 13min
+  // -> 2 runs concorrentes -> follow-up duplicado, pois last_followup_at é gravado
+  // DEPOIS de enfileirar). Mesmo padrão do reaper_lock (#39): UPDATE condicional
+  // atômico (confiável sob pooling do PostgREST) + stale window; libera no finally.
+  const lockStaleIso = new Date(Date.now() - LOCK_STALE_MS).toISOString();
+  const { data: lock } = await supabase
+    .from("stale_leads_lock")
+    .update({ locked_at: new Date().toISOString() })
+    .eq("id", true)
+    .or(`locked_at.is.null,locked_at.lt.${lockStaleIso}`)
+    .select("id")
+    .maybeSingle();
+  if (!lock) {
+    console.log("[stale-leads] já em execução (lock ocupado) — no-op");
+    return jsonResponse({ skipped: "already_running" });
+  }
+
+  try {
 
   // Owners com o pack follow-up HABILITADO (kill-switch = enabled).
   const { data: installs } = await supabase
@@ -158,4 +179,9 @@ Deno.serve(async (req: Request) => {
 
   console.log(`[stale-leads] owners=${owners} followups=${followups}`);
   return jsonResponse({ owners, followups });
+
+  } finally {
+    // Libera o lock em qualquer caminho de saída.
+    await supabase.from("stale_leads_lock").update({ locked_at: null }).eq("id", true);
+  }
 });

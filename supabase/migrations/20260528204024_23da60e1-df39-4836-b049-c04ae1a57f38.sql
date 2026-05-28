@@ -6,6 +6,21 @@
 CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;
 CREATE EXTENSION IF NOT EXISTS pg_net;
 
+-- Lock singleton p/ serializar o nina-stale-leads (R1-bis): o cron */13 com
+-- geração Lovable pode passar de 13min -> 2 runs concorrentes -> follow-up
+-- duplicado. Mesmo padrão JÁ PROVADO do reaper_lock (#39): UPDATE condicional
+-- atômico + stale window; linha PRÓPRIA (não contende com o reaper). RLS: só service_role.
+CREATE TABLE IF NOT EXISTS public.stale_leads_lock (
+  id boolean PRIMARY KEY DEFAULT true,
+  locked_at timestamptz,
+  CONSTRAINT stale_leads_lock_singleton CHECK (id = true)
+);
+INSERT INTO public.stale_leads_lock (id, locked_at) VALUES (true, NULL) ON CONFLICT (id) DO NOTHING;
+ALTER TABLE public.stale_leads_lock ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "service_role_all_stale_leads_lock" ON public.stale_leads_lock;
+CREATE POLICY "service_role_all_stale_leads_lock" ON public.stale_leads_lock
+  FOR ALL USING (auth.role() = 'service_role');
+
 CREATE OR REPLACE FUNCTION public.trigger_stale_leads()
 RETURNS void
 LANGUAGE plpgsql
