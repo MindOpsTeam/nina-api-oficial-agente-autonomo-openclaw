@@ -3,6 +3,7 @@ import { Loader2, KeyRound, Sparkles, AlertTriangle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useSecretsStatus, SECRET_NAMES, type SecretName } from '@/hooks/useSecretsStatus';
+import { validateAnthropicKey } from '@/services/cerebroService';
 import WriteOnlySecretField from './WriteOnlySecretField';
 
 const SECRET_META: Record<SecretName, { label: string; note: string }> = {
@@ -88,6 +89,7 @@ const SecretsTab: React.FC = () => {
           placeholder={TEXT.anthropicPlaceholder}
           configured={status.ANTHROPIC_API_KEY}
           onSave={handleSaveAnthropic}
+          onTest={validateAnthropicKey}
           icon={<KeyRound className="w-4 h-4" />}
           hint={
             <span className="flex items-center gap-1.5">
