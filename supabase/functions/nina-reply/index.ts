@@ -89,6 +89,38 @@ Deno.serve(async (req: Request) => {
     return new Response(null, { status: 204, headers: corsHeaders });
   }
 
+  // DEDUP: se já existe resposta da Nina nesta conversa criada DEPOIS da última
+  // msg do lead, PULA o insert. Cobre: (a) fallback Lovable respondeu + VPS
+  // respondeu depois; (b) reaper recuperou + VPS depois. Não bloqueia o 1º turno
+  // legítimo (aí ainda não há resposta da Nina após a última msg do lead).
+  const { data: lastLead } = await supabase
+    .from("messages")
+    .select("created_at")
+    .eq("conversation_id", conversation.id)
+    .eq("from_type", "user")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (lastLead?.created_at) {
+    const since = lastLead.created_at;
+    const dupSq = await supabase
+      .from("send_queue").select("id")
+      .eq("conversation_id", conversation.id).eq("from_type", "nina")
+      .gt("created_at", since).limit(1).maybeSingle();
+    let alreadyReplied = !!dupSq.data;
+    if (!alreadyReplied) {
+      const dupMsg = await supabase
+        .from("messages").select("id")
+        .eq("conversation_id", conversation.id).eq("from_type", "nina")
+        .gt("created_at", since).limit(1).maybeSingle();
+      alreadyReplied = !!dupMsg.data;
+    }
+    if (alreadyReplied) {
+      console.log(`[nina-reply] dedup: resposta já existe nesta conversa (run_id=${runId}) — pulando insert`);
+      return jsonResponse({ deduped: true, run_id: runId ?? null });
+    }
+  }
+
   const { data: queued, error: insErr } = await supabase
     .from("send_queue")
     .insert({
