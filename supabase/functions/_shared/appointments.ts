@@ -16,11 +16,11 @@ export async function createAppointmentFromAI(
   conversationId: string,
   userId: string | null,
   args: {
-    title: string;
+    title?: string;
     date: string;
     time: string;
     duration?: number;
-    type: 'demo' | 'meeting' | 'support' | 'followup';
+    type?: 'demo' | 'meeting' | 'support' | 'followup';
     description?: string;
   }
 ): Promise<any> {
@@ -67,8 +67,27 @@ export async function createAppointmentFromAI(
     }
   }
 
+  // appointments.title é NOT NULL e o agente às vezes chama o agendar.sh SEM
+  // title -> insert falhava (not-null violation) -> {ok:false} -> Nina "instável".
+  // Default robusto: usa o nome do contato; fallback genérico.
+  let resolvedTitle = (args.title ?? '').trim();
+  if (!resolvedTitle) {
+    let contactName = '';
+    try {
+      const { data: contact } = await supabase
+        .from('contacts')
+        .select('name, call_name')
+        .eq('id', contactId)
+        .maybeSingle();
+      contactName = (contact?.name || contact?.call_name || '').trim();
+    } catch (_e) {
+      // segue pro fallback genérico
+    }
+    resolvedTitle = contactName ? `Reunião com ${contactName}` : 'Reunião agendada pela Nina';
+  }
+
   const insertData: any = {
-    title: args.title,
+    title: resolvedTitle,
     date: args.date,
     time: args.time,
     duration: args.duration || 60,
