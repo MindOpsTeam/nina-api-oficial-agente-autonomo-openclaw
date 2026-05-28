@@ -206,7 +206,7 @@ _install_skill() {
         rm -rf "$BRAIN_DIR"
         git clone --depth 1 --branch "$branch" --filter=blob:none --sparse "$auth" "$BRAIN_DIR" 2>/dev/null \
             || fail "Falha ao clonar $SKILL_REPO ($branch). Repo privado? Confira GITHUB_BRAIN_TOKEN."
-        ( cd "$BRAIN_DIR" && git sparse-checkout set "skills/${SKILL_NAME}" "install/templates" )
+        ( cd "$BRAIN_DIR" && git sparse-checkout set "skills" "install/templates" )  # "skills" (não só skills/nina) p/ os Skill Packs (SP1)
         git -C "$BRAIN_DIR" remote set-url origin "$SKILL_REPO"   # tira o token do remote persistido
     fi
 
