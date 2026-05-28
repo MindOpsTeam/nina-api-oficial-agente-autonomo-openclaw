@@ -118,8 +118,10 @@ Por padrão a VPS sobe um **quick tunnel** (`*.trycloudflare.com`) — a URL **m
 ➡️ **Passo a passo completo:** veja [`install/docs/named-tunnel.md`](../install/docs/named-tunnel.md).
 Resumo: crie o tunnel no Cloudflare Zero Trust, aponte o Public Hostname para `localhost:18789`, e entregue `CF_TUNNEL_TOKEN` + `CF_TUNNEL_HOSTNAME` ao painel. Com os dois presentes, a VPS entra em modo named e registra a URL fixa.
 
-### 7.2 — Cron do reaper de órfãos
-Para limpar dados/chunks órfãos automaticamente, provisione o **cron do reaper**. Ele precisa da **service-role key** do seu projeto (passo de provisionamento). Configure-a como segredo no ambiente da função antes de agendar o cron.
+### 7.2 — Cron do reaper de runs órfãos
+Garante que **nenhum lead fique sem resposta**. Quando um turno da conversa é despachado para o OpenClaw na VPS mas a VPS **nunca chama de volta** (um *run órfão* — ex.: a instância caiu ou travou no meio), o lead ficaria no vácuo. O **reaper** roda a cada ~2 min, detecta turnos **sem resposta há mais de 5 min** e gera um **fallback** (resposta via Lovable AI) — assim o lead **sempre recebe algo**.
+
+Para provisionar: o reaper precisa da **service-role key** do seu projeto. Configure-a como segredo no ambiente da função e **agende o cron** (via `pg_cron`) para rodar a cada ~2 min.
 
 ---
 
