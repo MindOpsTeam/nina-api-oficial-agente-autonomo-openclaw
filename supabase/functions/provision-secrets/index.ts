@@ -41,7 +41,19 @@ Deno.serve(async (req: Request) => {
   try {
     const panel = await ensureSecret(admin, "PANEL_TOKEN");
     const nina = await ensureSecret(admin, "NINA_TOOLS_SECRET");
-    return jsonResponse({ panel_token: panel, nina_tools_secret: nina });
+
+    // Guarda a URL base do projeto no Vault (não é segredo aleatório — vem do env).
+    // O cron do reaper (public.trigger_reaper) lê SUPABASE_URL + PANEL_TOKEN do
+    // Vault em runtime pra montar o net.http_post sem nada hardcoded na migration.
+    let supabaseUrl: "set" | "skipped" = "skipped";
+    const url = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+    if (url) {
+      const { error } = await admin.rpc("set_secret", { secret_name: "SUPABASE_URL", secret_value: url });
+      if (error) console.error("[provision-secrets] set SUPABASE_URL error:", error.message);
+      else supabaseUrl = "set";
+    }
+
+    return jsonResponse({ panel_token: panel, nina_tools_secret: nina, supabase_url: supabaseUrl });
   } catch (e) {
     console.error("[provision-secrets] error:", (e as Error)?.message ?? e);
     return errorResponse("Erro ao provisionar secrets", 500);

@@ -118,10 +118,10 @@ Por padrão a VPS sobe um **quick tunnel** (`*.trycloudflare.com`) — a URL **m
 ➡️ **Passo a passo completo:** veja [`install/docs/named-tunnel.md`](../install/docs/named-tunnel.md).
 Resumo: crie o tunnel no Cloudflare Zero Trust, aponte o Public Hostname para `localhost:18789`, e entregue `CF_TUNNEL_TOKEN` + `CF_TUNNEL_HOSTNAME` ao painel. Com os dois presentes, a VPS entra em modo named e registra a URL fixa.
 
-### 7.2 — Cron do reaper de runs órfãos
+### 7.2 — Cron do reaper de runs órfãos (zero-toque, já vem ligado)
 Garante que **nenhum lead fique sem resposta**. Quando um turno da conversa é despachado para o OpenClaw na VPS mas a VPS **nunca chama de volta** (um *run órfão* — ex.: a instância caiu ou travou no meio), o lead ficaria no vácuo. O **reaper** roda a cada ~2 min, detecta turnos **sem resposta há mais de 5 min** e gera um **fallback** (resposta via Lovable AI) — assim o lead **sempre recebe algo**.
 
-Para provisionar: o reaper precisa da **service-role key** do seu projeto. Configure-a como segredo no ambiente da função e **agende o cron** (via `pg_cron`) para rodar a cada ~2 min.
+✅ **Nada a fazer manualmente.** O cron já é agendado automaticamente pela migration (estática) no provisionamento do remix. Ele se autentica lendo o `PANEL_TOKEN` do Vault **em runtime** (sem service-role key embutida) e resolve a URL do projeto pelo `SUPABASE_URL`, também do Vault. Esses dois segredos são populados pela etapa de **provisionamento de segredos** do onboarding (a mesma que gera `PANEL_TOKEN`/`NINA_TOOLS_SECRET`). Até os segredos existirem, o cron é um **no-op seguro**; assim que o onboarding provisiona, o reaper passa a rodar sozinho.
 
 ---
 

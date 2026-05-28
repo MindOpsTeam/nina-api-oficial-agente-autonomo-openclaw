@@ -12,16 +12,20 @@
  * (messages.metadata.reaped_at ausente). Idempotente: marca reaped_at só após
  * enfileirar com sucesso.
  *
- * Auth: service-role (Bearer SUPABASE_SERVICE_ROLE_KEY).
+ * Auth: X-Panel-Token (vs PANEL_TOKEN do Vault) — mesmo padrão das outras fns de
+ * painel. O cron (public.trigger_reaper) lê o PANEL_TOKEN do Vault em runtime e
+ * envia no header. As operações INTERNAS de DB seguem com SUPABASE_SERVICE_ROLE_KEY.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { corsHeaders } from "../_shared/panel.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { corsHeaders, errorResponse, validatePanelToken } from "../_shared/panel.ts";
 import { generateLovableReply } from "../_shared/lovable_reply.ts";
 
 const ORPHAN_MIN_AGE_MS = 5 * 60 * 1000;   // tem que ter > 5min (margem: latência openclaw observada ~30-100s; evita preemptar resposta boa com fallback)
 const ORPHAN_MAX_AGE_MS = 30 * 60 * 1000;  // janela: não reapar > 30min
 const BATCH = 50;
+// Stale-timeout do lock: só governa recuperação de crash (um run normal libera no
+// finally). Generoso p/ não reclamar um run legítimo em andamento.
+const LOCK_STALE_MS = 20 * 60 * 1000;
 
 const FALLBACK_SYSTEM_PROMPT =
   "Você é a Nina, SDR consultiva no WhatsApp. Responda à última mensagem do lead " +
@@ -64,39 +68,61 @@ async function hasNinaReplyAfter(supabase: any, conversationId: string, afterIso
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
-  const authFail = requireServiceRole(req, corsHeaders);
-  if (authFail) return authFail;
+  if (!(await validatePanelToken(req))) return errorResponse("Token inválido", 401);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
 
   const now = Date.now();
-  const olderThanIso = new Date(now - ORPHAN_MIN_AGE_MS).toISOString();
-  const withinIso = new Date(now - ORPHAN_MAX_AGE_MS).toISOString();
 
-  // Candidatos: inbound processados há 3–30min.
-  const { data: candidates, error: candErr } = await supabase
-    .from("messages")
-    .select("id, conversation_id, content, metadata, created_at")
-    .eq("from_type", "user")
-    .eq("processed_by_nina", true)
-    .lte("created_at", olderThanIso)
-    .gte("created_at", withinIso)
-    .order("created_at", { ascending: true })
-    .limit(BATCH);
-
-  if (candErr) {
-    console.error("[reaper] candidates query error:", candErr);
-    return new Response(JSON.stringify({ error: "query_failed" }), {
-      status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+  // R1: serializa execuções concorrentes. O cron */2 é fire-and-forget; se um run
+  // durar > 2min, o cron seguinte sobe um 2º run em paralelo -> ambos passam o
+  // check "sem resposta" antes de qualquer insert -> fallback DUPLICADO. Lock por
+  // LINHA (UPDATE condicional atômico) — confiável sob o pooling do PostgREST,
+  // diferente de advisory lock de SESSÃO via rpc (que vazaria entre conexões do
+  // pool e o unlock poderia cair em outra conexão). Stale-timeout auto-recupera crash.
+  const lockStaleIso = new Date(now - LOCK_STALE_MS).toISOString();
+  const { data: lock } = await supabase
+    .from("reaper_lock")
+    .update({ locked_at: new Date(now).toISOString() })
+    .eq("id", true)
+    .or(`locked_at.is.null,locked_at.lt.${lockStaleIso}`)
+    .select("id")
+    .maybeSingle();
+  if (!lock) {
+    console.log("[reaper] já em execução (lock ocupado) — no-op");
+    return new Response(JSON.stringify({ skipped: "already_running" }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   }
 
-  let scanned = 0;
-  let reaped = 0;
+  try {
+    const olderThanIso = new Date(now - ORPHAN_MIN_AGE_MS).toISOString();
+    const withinIso = new Date(now - ORPHAN_MAX_AGE_MS).toISOString();
 
-  for (const m of candidates ?? []) {
+    // Candidatos: inbound processados há 5–30min.
+    const { data: candidates, error: candErr } = await supabase
+      .from("messages")
+      .select("id, conversation_id, content, metadata, created_at")
+      .eq("from_type", "user")
+      .eq("processed_by_nina", true)
+      .lte("created_at", olderThanIso)
+      .gte("created_at", withinIso)
+      .order("created_at", { ascending: true })
+      .limit(BATCH);
+
+    if (candErr) {
+      console.error("[reaper] candidates query error:", candErr);
+      return new Response(JSON.stringify({ error: "query_failed" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    let scanned = 0;
+    let reaped = 0;
+
+    for (const m of candidates ?? []) {
     scanned++;
     if (m.metadata?.reaped_at) continue;                       // já tratado
     if (await hasNinaReplyAfter(supabase, m.conversation_id, m.created_at)) continue; // tem resposta -> não órfão
@@ -158,9 +184,13 @@ Deno.serve(async (req: Request) => {
 
     reaped++;
     console.log(`[reaper] órfão recuperado: msg=${m.id} conversa=${conversation.id}`);
-  }
+    }
 
-  return new Response(JSON.stringify({ scanned, reaped }), {
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+    return new Response(JSON.stringify({ scanned, reaped }), {
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  } finally {
+    // Libera o lock em qualquer caminho de saída (sucesso, erro ou return interno).
+    await supabase.from("reaper_lock").update({ locked_at: null }).eq("id", true);
+  }
 });

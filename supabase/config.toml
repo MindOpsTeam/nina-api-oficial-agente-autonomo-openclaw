@@ -12,5 +12,8 @@ verify_jwt = false
 [functions.nina-reply]
 verify_jwt = false
 
+[functions.reap-orphan-runs]
+verify_jwt = false
+
 [functions.onboarding-issue-token]
 verify_jwt = true
