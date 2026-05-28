@@ -1,10 +1,15 @@
 -- Migration: REAPER de runs órfãos (item 4) — agenda o reap-orphan-runs via pg_cron.
 --
--- ⚠️ APLICAR VIA MCP (Lovable Cloud não auto-aplica migrations). Antes de rodar,
--- SUBSTITUA os 2 placeholders:
+-- ════════════════════════════════════════════════════════════════════════════
+-- ⚠️⚠️  NUNCA APLICAR ESTE ARQUIVO VERBATIM  ⚠️⚠️
+-- Ele contém PLACEHOLDERS (__SUPABASE_URL__ / __SERVICE_ROLE_KEY__), de propósito.
+-- A versão PREENCHIDA com a service_role key REAL **NÃO** pode ser commitada nem
+-- colada em nenhum lugar persistente (chat, sticky, arquivo, log). Substitua os
+-- placeholders e aplique SOMENTE via MCP no provisionamento (Lovable Cloud não
+-- auto-aplica migrations). A key é segredo de servidor — trate como tal.
 --   __SUPABASE_URL__       -> ex: https://<project-ref>.supabase.co
---   __SERVICE_ROLE_KEY__   -> a service_role key do projeto
--- (Não commitamos a key no repo; o Maestro preenche ao aplicar.)
+--   __SERVICE_ROLE_KEY__   -> a service_role key do projeto (efêmera no apply)
+-- ════════════════════════════════════════════════════════════════════════════
 
 -- Extensões: pg_cron já existe; pg_net é necessário p/ o net.http_post.
 CREATE EXTENSION IF NOT EXISTS pg_cron WITH SCHEMA pg_catalog;

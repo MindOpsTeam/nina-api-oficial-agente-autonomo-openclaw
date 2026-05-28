@@ -7,7 +7,7 @@
  * no send_queue) — NÃO re-despacha pro openclaw (evitaria re-orfanizar).
  *
  * Órfão = mensagem inbound (from_type='user') com processed_by_nina=true, criada
- * há > 3min (e < 30min — janela de segurança), SEM resposta da Nina (from_type
+ * há > 5min (e < 30min — janela de segurança), SEM resposta da Nina (from_type
  * 'nina' em messages OU send_queue) criada DEPOIS dela, e ainda não tratada
  * (messages.metadata.reaped_at ausente). Idempotente: marca reaped_at só após
  * enfileirar com sucesso.
@@ -19,7 +19,7 @@ import { corsHeaders } from "../_shared/panel.ts";
 import { requireServiceRole } from "../_shared/auth.ts";
 import { generateLovableReply } from "../_shared/lovable_reply.ts";
 
-const ORPHAN_MIN_AGE_MS = 3 * 60 * 1000;   // tem que ter > 3min
+const ORPHAN_MIN_AGE_MS = 5 * 60 * 1000;   // tem que ter > 5min (margem: latência openclaw observada ~30-100s; evita preemptar resposta boa com fallback)
 const ORPHAN_MAX_AGE_MS = 30 * 60 * 1000;  // janela: não reapar > 30min
 const BATCH = 50;
 
@@ -116,7 +116,7 @@ Deno.serve(async (req: Request) => {
       .from("messages")
       .select("from_type, content")
       .eq("conversation_id", m.conversation_id)
-      .order("sent_at", { ascending: false })
+      .order("created_at", { ascending: false })
       .limit(20);
     const history = (recent ?? [])
       .reverse()
