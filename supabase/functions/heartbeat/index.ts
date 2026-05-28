@@ -5,14 +5,19 @@
  *
  * Auth: X-Panel-Token.
  * Body: { instance_id, ingress_url?, system_prompt?, openclaw_version? }
- * Retorna: 204 No Content.
+ * Retorna: 200 { anthropic_api_key } — a chave ATUAL do Vault, pra a VPS aplicar
+ * via self-heal (heartbeat.sh atualiza o .env + reinicia o gateway só quando
+ * mudou). SEGURANÇA: a chave trafega sobre HTTPS e a rota é autenticada por
+ * X-Panel-Token (mesmo nível de confiança da entrega no install via setup-installer).
  */
 import {
   adminClient,
   corsHeaders,
   errorResponse,
+  jsonResponse,
   validatePanelToken,
 } from "../_shared/panel.ts";
+import { getSecret } from "../_shared/secrets.ts";
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -52,5 +57,8 @@ Deno.serve(async (req: Request) => {
     return errorResponse("Erro ao atualizar heartbeat", 500);
   }
 
-  return new Response(null, { status: 204, headers: corsHeaders });
+  // Devolve a ANTHROPIC_API_KEY atual do Vault pra a VPS aplicar via self-heal.
+  // Rota autenticada por X-Panel-Token (ver cabeçalho). Vazio se ainda não configurada.
+  const anthropicKey = (await getSecret("ANTHROPIC_API_KEY")) ?? "";
+  return jsonResponse({ anthropic_api_key: anthropicKey });
 });

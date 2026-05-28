@@ -52,6 +52,35 @@ BODY="{\"instance_id\":$(_json_str "$INSTANCE_ID")"
 [[ -n "$OPENCLAW_VER" ]]     && BODY="${BODY},\"openclaw_version\":$(_json_str "$OPENCLAW_VER")"
 BODY="${BODY}}"
 
-_panel_post "heartbeat" "$BODY" >/dev/null && \
-    echo "[$(date '+%F %T')] heartbeat ok — instance=${INSTANCE_ID} ingress=${INGRESS_URL:-vazio}" >> "$LOG_FILE" || \
+RESP=$(_panel_post "heartbeat" "$BODY") && HB_OK=1 || HB_OK=0
+if [[ "$HB_OK" == "1" ]]; then
+    echo "[$(date '+%F %T')] heartbeat ok — instance=${INSTANCE_ID} ingress=${INGRESS_URL:-vazio}" >> "$LOG_FILE"
+else
     echo "[$(date '+%F %T')] heartbeat FALHOU" >> "$LOG_FILE"
+fi
+
+# ── Self-heal da ANTHROPIC_API_KEY ────────────────────────────────────────────
+# A resposta do /heartbeat traz a chave ATUAL do Vault (rota autenticada por
+# X-Panel-Token, sobre HTTPS — mesmo nível de confiança do install). Se vier
+# não-vazia E DIFERENTE da do .env, atualiza o .env e reinicia o gateway.
+# CRÍTICO: só reinicia quando a chave REALMENTE mudou (nada de restart a cada 5min).
+NEW_KEY=$(printf '%s' "$RESP" | python3 -c "import sys,json
+try:
+    print(json.load(sys.stdin).get('anthropic_api_key','') or '')
+except Exception:
+    print('')" 2>/dev/null || echo "")
+
+if [[ -n "$NEW_KEY" && "$NEW_KEY" != "${ANTHROPIC_API_KEY:-}" && -f "$_ENV_FILE" ]]; then
+    if grep -q "^ANTHROPIC_API_KEY=" "$_ENV_FILE"; then
+        sed -i "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${NEW_KEY}|" "$_ENV_FILE"
+    else
+        echo "ANTHROPIC_API_KEY=${NEW_KEY}" >> "$_ENV_FILE"
+    fi
+    ANTHROPIC_API_KEY="$NEW_KEY"
+    echo "[$(date '+%F %T')] ANTHROPIC_API_KEY mudou (self-heal) — reiniciando gateway" >> "$LOG_FILE"
+    if systemctl restart openclaw-gateway 2>/dev/null || sudo -n systemctl restart openclaw-gateway 2>/dev/null; then
+        echo "[$(date '+%F %T')] openclaw-gateway reiniciado (nova chave aplicada)" >> "$LOG_FILE"
+    else
+        echo "[$(date '+%F %T')] WARN: restart do openclaw-gateway falhou (chave gravada no .env, restart pendente)" >> "$LOG_FILE"
+    fi
+fi
