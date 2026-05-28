@@ -110,3 +110,41 @@ export function setLastSync(result: LastSync): void {
   if (typeof window !== 'undefined') window.localStorage.setItem(SYNC_KEY, JSON.stringify(result));
   notifyCerebroChanged();
 }
+
+export interface KeyValidation {
+  ok: boolean;
+  error?: string;
+  /** Só para o PAT do GitHub: o token tem permissão de escrita no repositório. */
+  canWrite?: boolean;
+}
+
+/**
+ * Chama uma edge fn de validação (lê a chave do Vault e testa a conexão real).
+ * Trata 200 com { ok:false } e respostas não-2xx; se a fn não existir/estiver fora,
+ * retorna ok:false com mensagem amigável (sem quebrar a UI).
+ */
+async function invokeValidate(fn: 'validate-anthropic-key' | 'validate-github-pat'): Promise<KeyValidation> {
+  try {
+    const { data, error } = await supabase.functions.invoke(fn);
+    if (error) {
+      const ctx = (error as { context?: Response })?.context;
+      let msg: string | undefined;
+      if (ctx && typeof ctx.json === 'function') {
+        try {
+          const payload = await ctx.json();
+          msg = payload?.error ?? payload?.message;
+        } catch {
+          /* corpo não-JSON */
+        }
+      }
+      return { ok: false, error: msg ?? 'Não foi possível validar agora. Tente novamente.' };
+    }
+    return { ok: !!data?.ok, error: data?.error, canWrite: data?.can_write };
+  } catch (err) {
+    console.warn(`[cerebroService] ${fn} indisponível:`, err);
+    return { ok: false, error: 'Validação indisponível no momento.' };
+  }
+}
+
+export const validateAnthropicKey = (): Promise<KeyValidation> => invokeValidate('validate-anthropic-key');
+export const validateGithubPat = (): Promise<KeyValidation> => invokeValidate('validate-github-pat');

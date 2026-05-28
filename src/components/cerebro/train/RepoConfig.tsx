@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 import { useNinaSettings } from '@/hooks/useNinaSettings';
 import { useSecretsStatus } from '@/hooks/useSecretsStatus';
+import { validateGithubPat } from '@/services/cerebroService';
 import WriteOnlySecretField from './WriteOnlySecretField';
 
 const TEXT = {
@@ -87,6 +88,8 @@ const RepoConfig: React.FC = () => {
           placeholder={TEXT.patPlaceholder}
           configured={status.GITHUB_BRAIN_TOKEN}
           onSave={handleSavePat}
+          onTest={validateGithubPat}
+          requireCanWrite
           icon={<KeyRound className="w-4 h-4" />}
           instruction={
             <span>
