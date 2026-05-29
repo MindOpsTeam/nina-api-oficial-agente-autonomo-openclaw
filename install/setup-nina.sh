@@ -117,8 +117,27 @@ export OPENCLAW_NO_RESPAWN=1
 # ═══════════════════════════════════════════════════════════════════════════════
 # PASSO 3 — Tokens
 # ═══════════════════════════════════════════════════════════════════════════════
-if [[ -z "${HOOKS_TOKEN:-}" ]]; then HOOKS_TOKEN=$(openssl rand -hex 16); ok "HOOKS_TOKEN gerado."; fi
 mkdir -p "${HOME}/.openclaw"
+
+# Anti-drift: se o openclaw.json foi escrito por OUTRA versão (ex.: 2026.5.27 que
+# se auto-instalou) -> binário pinado + config de outra versão = tool-calling morto.
+# Regenera no formato da versão PINADA, PRESERVANDO gateway.auth.token + hooks.token
+# (têm que bater com instances). Os sets do PASSO 3/4/5 reconstroem o resto.
+_CFG="${HOME}/.openclaw/openclaw.json"
+if [[ -f "$_CFG" ]]; then
+    _CFGVER=$(python3 -c "import json;print(json.load(open('$_CFG')).get('meta',{}).get('lastTouchedVersion','') or '')" 2>/dev/null || echo "")
+    if [[ -n "$_CFGVER" && "$_CFGVER" != "$OPENCLAW_VERSION" ]]; then
+        warn "Config escrita por ${_CFGVER} (pin=${OPENCLAW_VERSION}) — regenerando no formato pinado (preserva tokens)."
+        _PGW=$(python3 -c "import json;print(json.load(open('$_CFG')).get('gateway',{}).get('auth',{}).get('token','') or '')" 2>/dev/null || echo "")
+        _PHK=$(python3 -c "import json;print(json.load(open('$_CFG')).get('hooks',{}).get('token','') or '')" 2>/dev/null || echo "")
+        cp "$_CFG" "${_CFG}.bk-${_CFGVER}" 2>/dev/null || true
+        rm -f "$_CFG"
+        [[ -n "$_PGW" ]] && openclaw config set gateway.auth.token "$_PGW" 2>&1 | grep -v "^Config overwrite" || true
+        [[ -n "$_PHK" && -z "${HOOKS_TOKEN:-}" ]] && HOOKS_TOKEN="$_PHK"
+    fi
+fi
+
+if [[ -z "${HOOKS_TOKEN:-}" ]]; then HOOKS_TOKEN=$(openssl rand -hex 16); ok "HOOKS_TOKEN gerado."; fi
 if ! python3 -c "import json,os,sys; t=json.load(open(os.path.expanduser('~/.openclaw/openclaw.json'))).get('gateway',{}).get('auth',{}).get('token'); sys.exit(0 if t else 1)" 2>/dev/null; then
     GW_TOKEN=$(openssl rand -hex 24)
     openclaw config set gateway.auth.token "$GW_TOKEN" 2>&1 | grep -v "^Config overwrite" || true
@@ -247,6 +266,8 @@ BRAIN_REPO=${SKILL_REPO}
 BRAIN_BRANCH=${BRAIN_BRANCH}
 BRAIN_DIR=${BRAIN_DIR}
 SKILL_DEST=${SKILL_DEST}
+# Versão pinada do OpenClaw (heartbeat.sh re-pina se driftar)
+OPENCLAW_VERSION=${OPENCLAW_VERSION}
 EOF
 chmod 600 "$ENV_FILE"
 ok "Env persistido em ${ENV_FILE}."
