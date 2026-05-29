@@ -30,6 +30,13 @@ function publicHttpUrl(raw: string): { url: string; domain: string } | null {
   if (u.protocol !== "http:" && u.protocol !== "https:") return null;
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (!host || host === "localhost" || host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return null;
+  if (host.includes(":")) {
+    // IPv6 literal: bloqueia loopback/ULA/link-local; público é permitido.
+    // (Gatear em ':' evita over-block de domínios que começam com fc/fd — ex.:
+    //  fcbarcelona.com, fd.com — e permite IPv6 público, que não tem ".".)
+    if (host === "::1" || host === "::" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return null;
+    return { url: u.toString(), domain: host };
+  }
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) { // IPv4 literal
     const p = host.split(".").map(Number);
     if (p[0] === 0 || p[0] === 10 || p[0] === 127) return null;
@@ -38,8 +45,7 @@ function publicHttpUrl(raw: string): { url: string; domain: string } | null {
     if (p[0] === 192 && p[1] === 168) return null;            // privado
     if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return null; // CGNAT
   }
-  if (host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80") || host.startsWith("::")) return null; // IPv6 loopback/ULA/link-local
-  if (!host.includes(".")) return null; // exige domínio com TLD
+  if (!host.includes(".")) return null; // domínio/IPv4 exige "." (não se aplica a IPv6, tratado acima)
   return { url: u.toString(), domain: host.replace(/^www\./, "") };
 }
 
