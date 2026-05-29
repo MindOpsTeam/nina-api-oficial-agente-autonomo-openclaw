@@ -325,6 +325,42 @@ export type Database = {
           },
         ]
       }
+      custom_knowledge_skills: {
+        Row: {
+          content: string
+          created_at: string
+          description: string | null
+          enabled: boolean
+          id: string
+          name: string
+          owner_user_id: string
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          id?: string
+          name: string
+          owner_user_id?: string
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          description?: string | null
+          enabled?: boolean
+          id?: string
+          name?: string
+          owner_user_id?: string
+          slug?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       deal_activities: {
         Row: {
           completed_at: string | null
