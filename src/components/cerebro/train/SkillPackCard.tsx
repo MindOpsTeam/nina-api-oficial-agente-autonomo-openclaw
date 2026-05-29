@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { BookOpen, Wrench, KeyRound, Server, AlertTriangle } from 'lucide-react';
+import { BookOpen, Wrench, Server, AlertTriangle } from 'lucide-react';
 import { Switch } from '../../ui/switch';
 import { toast } from 'sonner';
 import type { SkillPack, PackConfig } from '@/hooks/useSkillPacks';
+import PackSecretField from './PackSecretField';
 
 const TEXT = {
   requiresSecret: 'Requer chave:',
@@ -107,12 +108,6 @@ const SkillPackCard: React.FC<SkillPackCardProps> = ({ pack, onToggle, onConfig 
           </div>
           {pack.description && <p className="text-xs text-slate-400 mt-1">{pack.description}</p>}
 
-          {pack.requires_secrets.length > 0 && (
-            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-amber-400">
-              <KeyRound className="w-3.5 h-3.5 flex-shrink-0" />
-              {TEXT.requiresSecret} <code className="text-amber-300">{pack.requires_secrets.join(', ')}</code>
-            </p>
-          )}
           {pack.requires_edge_fns.length > 0 && (
             <p className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-500">
               <Server className="w-3.5 h-3.5 flex-shrink-0" />
@@ -123,6 +118,15 @@ const SkillPackCard: React.FC<SkillPackCardProps> = ({ pack, onToggle, onConfig 
 
         <Switch checked={pack.enabled} onCheckedChange={handleToggle} disabled={busy} className="flex-shrink-0 mt-0.5" />
       </div>
+
+      {/* Chaves exigidas pelo pack — configuráveis independente do toggle. */}
+      {pack.requires_secrets.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-800 space-y-3">
+          {pack.requires_secrets.map((name) => (
+            <PackSecretField key={name} secretName={name} />
+          ))}
+        </div>
+      )}
 
       {pack.enabled && isDuration && (
         <div className="mt-4 pt-3 border-t border-slate-800">
