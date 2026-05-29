@@ -11,7 +11,7 @@ import { corsHeaders, errorResponse, jsonResponse } from "../_shared/panel.ts";
 import { getSecret } from "../_shared/secrets.ts";
 import { getJwtUser } from "../_shared/userauth.ts";
 
-const NAMES = ["PANEL_TOKEN", "NINA_TOOLS_SECRET", "ANTHROPIC_API_KEY", "GITHUB_BRAIN_TOKEN"] as const;
+const NAMES = ["PANEL_TOKEN", "NINA_TOOLS_SECRET", "ANTHROPIC_API_KEY", "GITHUB_BRAIN_TOKEN", "FIRECRAWL_API_KEY"] as const;
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });

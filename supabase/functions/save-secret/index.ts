@@ -4,7 +4,7 @@
  *
  * Auth: JWT do user.
  * Body: { name, value }
- * name DEVE estar no ALLOWLIST hardcoded (GITHUB_BRAIN_TOKEN, ANTHROPIC_API_KEY)
+ * name DEVE estar no ALLOWLIST hardcoded (GITHUB_BRAIN_TOKEN, ANTHROPIC_API_KEY, FIRECRAWL_API_KEY)
  * — o cliente não pode gravar segredo arbitrário no Vault.
  * Retorna: { ok: true } | { error }. Nunca ecoa o valor.
  *
@@ -14,7 +14,7 @@
 import { adminClient, corsHeaders, errorResponse, jsonResponse } from "../_shared/panel.ts";
 import { getJwtUser } from "../_shared/userauth.ts";
 
-const ALLOWLIST = new Set(["GITHUB_BRAIN_TOKEN", "ANTHROPIC_API_KEY"]);
+const ALLOWLIST = new Set(["GITHUB_BRAIN_TOKEN", "ANTHROPIC_API_KEY", "FIRECRAWL_API_KEY"]);
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
