@@ -23,6 +23,13 @@ const LOVABLE_REQUEST_TIMEOUT_MS = 30_000;
 // Falha/timeout no ACK => cai no fallback síncrono do Lovable no mesmo turno.
 const HOOKS_DISPATCH_TIMEOUT_MS = 12_000;
 
+// Nível de thinking enviado no /hooks/agent (vira thinkingLevelOverride no OpenClaw).
+// BUG do OpenClaw 2026.5.26: o default p/ claude-sonnet-4-6 resolve 'adaptive', que
+// NÃO é suportado p/ esse modelo -> rebaixa pra 'off' e o agente para de fazer
+// tool-calls (não chama nem o nina_reply.sh). Passar um nível explícito SUPORTADO
+// no payload vence o default bugado (resolvedThinkLevel = override ?? ... ?? sessionDefault).
+const OPENCLAW_THINKING_LEVEL = 'low';
+
 // Tool definition for appointment creation
 const createAppointmentTool = {
   type: "function",
@@ -593,6 +600,7 @@ async function processQueueItem(
               wakeMode: 'now',
               deliver: false,
               timeoutSeconds: 120,
+              thinking: OPENCLAW_THINKING_LEVEL,
               metadata: {
                 conversation_id: conversation.id,
                 run_id: runId,

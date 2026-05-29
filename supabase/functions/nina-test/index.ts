@@ -104,6 +104,7 @@ Deno.serve(async (req: Request) => {
         wakeMode: "now",
         deliver: false,
         timeoutSeconds: 120,
+        thinking: "low", // OpenClaw 2026.5.26: evita o default 'adaptive'->off (sonnet-4-6) que mata o tool-calling
         metadata: {
           conversation_id: testConversationId,
           run_id: runId,
