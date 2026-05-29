@@ -11,15 +11,25 @@ const TEXT = {
   error: 'Erro ao atualizar habilidade',
   configSaved: 'Configuração salva',
   durationLabel: 'Janela do follow-up',
-  metaWarning:
-    'Recomendado manter dentro de 24h. Fora da janela de 24h da Meta, o WhatsApp exige template pago — o follow-up não será enviado.',
+  metaWarning: 'O follow-up só dispara dentro da janela de 24h da Meta (mensagem gratuita).',
 } as const;
 
-const DURATION_UNITS = [
+type DurationUnit = 'minutos' | 'horas';
+
+const DURATION_UNITS: { value: DurationUnit; label: string }[] = [
   { value: 'minutos', label: 'Minutos' },
   { value: 'horas', label: 'Horas' },
-  { value: 'dias', label: 'Dias' },
-] as const;
+];
+
+// Teto por unidade para a janela ficar SEMPRE < 24h (acima disso a Meta exige template pago).
+const MAX_BY_UNIT: Record<DurationUnit, number> = { minutos: 1439, horas: 23 };
+
+const normalizeUnit = (u: unknown): DurationUnit => (u === 'minutos' ? 'minutos' : 'horas');
+
+const clampValor = (valor: number, unit: DurationUnit): number => {
+  const n = Math.floor(Number(valor)) || 1;
+  return Math.min(MAX_BY_UNIT[unit], Math.max(1, n));
+};
 
 const fieldClass =
   'h-9 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50';
@@ -52,6 +62,8 @@ const SkillPackCard: React.FC<SkillPackCardProps> = ({ pack, onToggle, onConfig 
     (k) => !['janela_valor', 'janela_unidade'].includes(k),
   );
 
+  const currentUnit = normalizeUnit(draftConfig.janela_unidade);
+
   const handleToggle = async (checked: boolean) => {
     setBusy(true);
     const ok = await onToggle(pack.slug, checked);
@@ -64,11 +76,13 @@ const SkillPackCard: React.FC<SkillPackCardProps> = ({ pack, onToggle, onConfig 
     toast[ok ? 'success' : 'error'](ok ? TEXT.configSaved : TEXT.error);
   };
 
-  // Duração: número (>=1) + select de unidade. Persiste { ...config, janela_valor, janela_unidade }.
+  // Duração: número (1..max da unidade) + select (minutos|horas). Persiste { janela_valor, janela_unidade }.
+  // Ao trocar a unidade, re-clampa o valor para o teto da nova unidade (sempre < 24h).
   const commitDuration = (patch: Partial<PackConfig>) => {
     const merged = { ...draftConfig, ...patch };
-    const valor = Math.max(1, Math.floor(Number(merged.janela_valor)) || 1);
-    const next: PackConfig = { ...merged, janela_valor: valor };
+    const unit = normalizeUnit(merged.janela_unidade);
+    const valor = clampValor(Number(merged.janela_valor), unit);
+    const next: PackConfig = { ...merged, janela_unidade: unit, janela_valor: valor };
     setDraftConfig(next);
     if (next.janela_valor !== pack.config.janela_valor || next.janela_unidade !== pack.config.janela_unidade) {
       persist(next);
@@ -117,13 +131,14 @@ const SkillPackCard: React.FC<SkillPackCardProps> = ({ pack, onToggle, onConfig 
             <input
               type="number"
               min={1}
+              max={MAX_BY_UNIT[currentUnit]}
               value={Number(draftConfig.janela_valor ?? 1)}
               onChange={(e) => setDraftConfig((c) => ({ ...c, janela_valor: Number(e.target.value) }))}
               onBlur={() => commitDuration({})}
               className={`${fieldClass} w-24`}
             />
             <select
-              value={String(draftConfig.janela_unidade ?? 'horas')}
+              value={currentUnit}
               onChange={(e) => commitDuration({ janela_unidade: e.target.value })}
               className={`${fieldClass} flex-1`}
             >
