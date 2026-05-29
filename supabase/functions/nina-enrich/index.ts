@@ -31,10 +31,11 @@ function publicHttpUrl(raw: string): { url: string; domain: string } | null {
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (!host || host === "localhost" || host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return null;
   if (host.includes(":")) {
-    // IPv6 literal: bloqueia loopback/ULA/link-local; público é permitido.
-    // (Gatear em ':' evita over-block de domínios que começam com fc/fd — ex.:
-    //  fcbarcelona.com, fd.com — e permite IPv6 público, que não tem ".".)
-    if (host === "::1" || host === "::" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return null;
+    // IPv6 literal: bloqueia loopback/ULA/link-local E IPv4-mapped (::ffff:*, que
+    // cobre ::ffff:127.0.0.1 / 169.254.169.254 / 10.x etc); público é permitido.
+    // startsWith('::') é seguro aqui pois só IPv6 entra neste branch (host tem ':').
+    // (Gatear em ':' evita over-block de domínios fc*/fd* — ex.: fcbarcelona.com.)
+    if (host.startsWith("::") || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")) return null;
     return { url: u.toString(), domain: host };
   }
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) { // IPv4 literal
