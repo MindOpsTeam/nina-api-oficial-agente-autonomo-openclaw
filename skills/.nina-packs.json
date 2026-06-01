@@ -1,0 +1,11 @@
+{
+  "enabled": [
+    "tratamento-objecoes",
+    "pesquisa-empresa"
+  ],
+  "managed": [
+    "pesquisa-empresa",
+    "tratamento-objecoes",
+    "follow-up"
+  ]
+}
