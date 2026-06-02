@@ -88,3 +88,20 @@ if [[ -n "$NEW_KEY" && "$NEW_KEY" != "${ANTHROPIC_API_KEY:-}" && -f "$_ENV_FILE"
         echo "[$(date '+%F %T')] WARN: restart do openclaw-gateway falhou (chave gravada no .env, restart pendente)" >> "$LOG_FILE"
     fi
 fi
+
+# ── Self-heal de VERSÃO do OpenClaw ───────────────────────────────────────────
+# Se o binário driftou da versão PINADA (ex.: auto-update pro 2026.5.27, que quebra
+# o tool-calling do hook do sonnet-4-6), re-pina + reinicia. OPENCLAW_VERSION vem do
+# .env (gravado pelo setup-nina.sh). Sem a var (.env antigo) -> não faz nada.
+if [[ -n "${OPENCLAW_VERSION:-}" ]]; then
+    _CURVER=$(openclaw --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "")
+    if [[ -n "$_CURVER" && "$_CURVER" != "$OPENCLAW_VERSION" ]]; then
+        echo "[$(date '+%F %T')] WARN: openclaw ${_CURVER} != pin ${OPENCLAW_VERSION} — re-pinando" >> "$LOG_FILE"
+        if sudo -n npm install -g openclaw@"$OPENCLAW_VERSION" >/dev/null 2>&1; then
+            sudo -n systemctl restart openclaw-gateway 2>/dev/null || systemctl restart openclaw-gateway 2>/dev/null || true
+            echo "[$(date '+%F %T')] openclaw re-pinado em ${OPENCLAW_VERSION} + gateway reiniciado" >> "$LOG_FILE"
+        else
+            echo "[$(date '+%F %T')] WARN: re-pin falhou (sem sudo?) — drift de versão pendente" >> "$LOG_FILE"
+        fi
+    fi
+fi
